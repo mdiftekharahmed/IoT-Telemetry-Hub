@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================
-#  IoT Telemetry Hub — one-shot install script
+#  IoT Telemetry Hub — Installation Script
 #  Tested on: Ubuntu 24.04 LTS
 #
 #  Run as a sudo-capable user (NOT as root):

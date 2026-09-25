@@ -25,6 +25,24 @@ Everything is served by FastAPI and packaged in the application image. No remote
 fonts, CDNs or design services are required. The user-provided screenshots informed
 the navy/emerald palette, sidebar, login composition and table styling.
 
+## Installation
+
+To install and run the full backend (including the PostgreSQL database, MQTT broker, and API) on a Linux server (e.g., Ubuntu), use the automated `install.sh` script.
+
+Run the following command on your server (as a user with sudo privileges):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mdiftekharahmed/IoT-Telemetry-Hub/main/install.sh | bash
+```
+
+The installation script will:
+1. Install Docker and its dependencies
+2. Clone this repository
+3. Help you configure passwords and environment variables
+4. Build the Docker images and start all services
+
+Once running, the script will provide you with the final command to create your admin account. For manual setup or more detailed deployment instructions, see the [Deployment Guide](deploy/README.md).
+
 ## Native Windows development
 
 Python 3.12+ is required; development is currently tested with Python 3.14.
