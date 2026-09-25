@@ -339,32 +339,53 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         def rows():
             output = io.StringIO(newline="")
             writer = csv.writer(output)
-            writer.writerow(["timestamp", "device_id", "parameter", "value"])
-            yield output.getvalue()
+            
             with app.state.sessions() as db:
+                columns = sorted(set(db.scalars(select(Parameter.name))) | set(db.scalars(select(Telemetry.parameter).distinct())))
+                if "systemTemp" in columns:
+                    columns.remove("systemTemp")
                 units = dict(db.execute(select(Parameter.name, Parameter.unit)).all())
+                
+                header = ["timestamp", "device_id", "device_name"]
+                for c in columns:
+                    header.append(f"{c}({units[c]})" if units.get(c) else c)
+                
+                writer.writerow(header)
+                yield output.getvalue()
+
                 statement = (
-                    select(Telemetry)
-                    .where(Telemetry.timestamp >= start, Telemetry.timestamp < end)
-                    .order_by(Telemetry.timestamp, Telemetry.id)
-                    .execution_options(yield_per=1000)
+                    select(TelemetryRecord, Device.name, Telemetry.parameter, Telemetry.value)
+                    .join(Device, Device.device_id == TelemetryRecord.device_id)
+                    .join(Telemetry, Telemetry.record_id == TelemetryRecord.id)
+                    .where(TelemetryRecord.timestamp >= start, TelemetryRecord.timestamp < end)
+                    .order_by(TelemetryRecord.timestamp, TelemetryRecord.id)
+                    .execution_options(yield_per=5000)
                 )
-                for row in db.scalars(statement):
-                    if row.parameter == "systemTemp":
+                
+                current_record_id = None
+                current_row = None
+                
+                for record, device_name, param, val in db.execute(statement):
+                    if param == "systemTemp":
                         continue
+                    if record.id != current_record_id:
+                        if current_row is not None:
+                            output.seek(0)
+                            output.truncate(0)
+                            writer.writerow([current_row.get(col, "") for col in ["timestamp", "device_id", "device_name"] + columns])
+                            yield output.getvalue()
+                        current_record_id = record.id
+                        current_row = {
+                            "timestamp": as_utc(record.timestamp).isoformat(),
+                            "device_id": record.device_id,
+                            "device_name": device_name or "",
+                        }
+                    current_row[param] = val
+                    
+                if current_row is not None:
                     output.seek(0)
                     output.truncate(0)
-                    param_display = row.parameter
-                    if units.get(row.parameter):
-                        param_display = f"{row.parameter}({units[row.parameter]})"
-                    writer.writerow(
-                        [
-                            as_utc(row.timestamp).isoformat(),
-                            row.device_id,
-                            param_display,
-                            row.value,
-                        ]
-                    )
+                    writer.writerow([current_row.get(col, "") for col in ["timestamp", "device_id", "device_name"] + columns])
                     yield output.getvalue()
 
         return StreamingResponse(
