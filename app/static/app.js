@@ -99,7 +99,7 @@ async function renderData() {
             <td class="record-id">#${String(rec.registry_id).padStart(6, "0")}</td>
             <td><div class="device-cell"><span class="device-cell-icon">${icon("chip")}</span><div><strong>${esc(rec.device_name || rec.device_id)}</strong><small class="muted">${esc(rec.device_id)}</small></div></div></td>
             <td class="date-cell">${utcDate(rec.timestamp)}</td>
-            ${columns.map((c) => `<td class="value-cell">${rec.values[c] !== undefined ? esc(rec.values[c]) : "<span class=\"muted\">—</span>"}</td>`).join("")}
+            ${columns.map((c) => `<td class="value-cell">${rec.values[c] !== undefined ? esc(rec.values[c]) + (result.units[c] ? ` <span class="muted" style="font-size: 0.9em;">${esc(result.units[c])}</span>` : "") : "<span class=\"muted\">—</span>"}</td>`).join("")}
             <td><div style="display: flex; align-items: center; gap: 8px;" title="${esc(healthTitle(rec))}">${healthBadge(rec.health)}${rec.values["systemTemp"] !== undefined ? `<span class="muted" style="font-size: 0.9em;">${esc(rec.values["systemTemp"])}${rule.unit ? `\u00a0${esc(rule.unit)}` : ""}</span>` : ""}</div></td>
           </tr>`).join("")}</tbody>
         </table>
@@ -139,11 +139,12 @@ async function renderParameters() {
   state.parameters = await api("/api/parameters");
   main.innerHTML = heading("KEEP WHAT MATTERS", "Allowed parameters", "Choose which sensor values are approved for storage across all devices.", `<button class="button button-green" id="add-parameter">${icon("plus")}Add parameter</button>`) + stats() +
     `<section class="panel">${panelTop("sliders", "Parameter whitelist", "One shared whitelist for every registered device", `${state.summary.enabled_parameters} enabled`)}${state.parameters.length ?
-      `<div class="table-scroll" tabindex="0" aria-label="Parameters table"><table><thead><tr><th>Parameter name</th><th>Value type</th><th>Scope</th><th>Status</th><th>Actions</th></tr></thead><tbody>${state.parameters.map((parameter) => `<tr><td><span class="parameter-pill ${parameterColor(parameter.name)}">${esc(parameter.name)}</span></td><td>Numeric</td><td><span class="muted">All devices</span></td><td><div class="status-control"><button class="toggle" role="switch" aria-checked="${parameter.enabled}" aria-label="Enable ${esc(parameter.name)}" data-toggle-parameter="${esc(parameter.name)}"></button>${status(parameter.enabled)}</div></td><td><div class="row-actions"><button class="icon-button danger" aria-label="Remove ${esc(parameter.name)}" data-remove-parameter="${esc(parameter.name)}">${icon("trash")}</button></div></td></tr>`).join("")}</tbody></table></div>` : empty("sliders", "Give your data a little direction", "Add the parameter names your sensors publish, such as temperature or humidity.", '<button class="button button-green" id="empty-add">Add your first parameter</button>')}
+      `<div class="table-scroll" tabindex="0" aria-label="Parameters table"><table><thead><tr><th>Parameter name</th><th>Unit</th><th>Scope</th><th>Status</th><th>Actions</th></tr></thead><tbody>${state.parameters.map((parameter) => `<tr><td><span class="parameter-pill ${parameterColor(parameter.name)}">${esc(parameter.name)}</span></td><td>${parameter.unit ? esc(parameter.unit) : '<span class="muted">—</span>'}</td><td><span class="muted">All devices</span></td><td><div class="status-control"><button class="toggle" role="switch" aria-checked="${parameter.enabled}" aria-label="Enable ${esc(parameter.name)}" data-toggle-parameter="${esc(parameter.name)}"></button>${status(parameter.enabled)}</div></td><td><div class="row-actions"><button class="button button-ghost" data-edit-parameter="${esc(parameter.name)}">${icon("edit")}Edit</button><button class="icon-button danger" aria-label="Remove ${esc(parameter.name)}" data-remove-parameter="${esc(parameter.name)}">${icon("trash")}</button></div></td></tr>`).join("")}</tbody></table></div>` : empty("sliders", "Give your data a little direction", "Add the parameter names your sensors publish, such as temperature or humidity.", '<button class="button button-green" id="empty-add">Add your first parameter</button>')}
       <div class="table-bottom"><span>${state.parameters.length} ${state.parameters.length === 1 ? "parameter" : "parameters"} in your whitelist</span><span>Names are case-sensitive</span></div></section>` +
     info("<strong>History stays intact.</strong> Removing or disabling a parameter only affects new readings. Previously stored values remain available for viewing and export.");
-  document.querySelector("#add-parameter").onclick = parameterForm;
-  document.querySelector("#empty-add")?.addEventListener("click", parameterForm);
+  document.querySelector("#add-parameter").onclick = () => parameterForm();
+  document.querySelector("#empty-add")?.addEventListener("click", () => parameterForm());
+  main.querySelectorAll("[data-edit-parameter]").forEach((button) => button.onclick = () => parameterForm(state.parameters.find((p) => p.name === button.dataset.editParameter)));
   main.querySelectorAll("[data-toggle-parameter]").forEach((button) => button.onclick = async () => {
     const parameter = state.parameters.find((p) => p.name === button.dataset.toggleParameter);
     button.disabled = true;
@@ -175,10 +176,12 @@ function deviceForm(device) {
     toast(device ? "Device updated." : "Device added. You're ready to connect it.");
   });
 }
-function parameterForm() {
-  modal("Add a parameter", '<div class="field"><label for="parameter-name">Parameter name</label><input id="parameter-name" name="name" type="text" placeholder="e.g. temperature" pattern="[A-Za-z][A-Za-z0-9_]{0,63}" maxlength="64" required><p class="field-help">Use the exact name sent by your sensor. Start with a letter; use letters, numbers and underscores.</p></div><label class="checkbox-label"><input type="checkbox" name="enabled" checked>Enable this parameter for all devices</label>', "Add parameter", async (form) => {
-    await api("/api/parameters", {method: "POST", body: JSON.stringify({name: form.get("name").trim(), enabled: form.has("enabled")})});
-    toast("Parameter added to your whitelist.");
+function parameterForm(parameter) {
+  modal(parameter ? "Edit parameter" : "Add a parameter", `<div class="field"><label for="parameter-name">Parameter name</label><input id="parameter-name" name="name" type="text" placeholder="e.g. temperature" pattern="[A-Za-z][A-Za-z0-9_]{0,63}" maxlength="64" value="${esc(parameter?.name || "")}" ${parameter ? "disabled" : "required"}><p class="field-help">Use the exact name sent by your sensor. Start with a letter; use letters, numbers and underscores.</p></div><div class="field"><label for="parameter-unit">Unit (Optional)</label><input id="parameter-unit" name="unit" type="text" placeholder="e.g. °C, ppm, V" maxlength="16" value="${esc(parameter?.unit || "")}"><p class="field-help">Display unit to show beside the value.</p></div><label class="checkbox-label"><input type="checkbox" name="enabled" ${!parameter || parameter.enabled ? "checked" : ""}>Enable this parameter for all devices</label>`, parameter ? "Save changes" : "Add parameter", async (form) => {
+    const body = {enabled: form.has("enabled"), unit: form.get("unit").trim() || null};
+    if (!parameter) body.name = form.get("name").trim();
+    await api(parameter ? `/api/parameters/${encodeURIComponent(parameter.name)}` : "/api/parameters", {method: parameter ? "PUT" : "POST", body: JSON.stringify(body)});
+    toast(parameter ? "Parameter updated." : "Parameter added to your whitelist.");
   });
 }
 function removeParameter(name) {

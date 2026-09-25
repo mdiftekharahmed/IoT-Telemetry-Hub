@@ -61,10 +61,12 @@ class DeviceOut(DeviceCreate):
 
 class ParameterCreate(InputModel):
     name: ParameterName
+    unit: str | None = Field(default=None, max_length=16)
     enabled: bool = True
 
 
 class ParameterUpdate(InputModel):
+    unit: str | None = Field(default=None, max_length=16)
     enabled: bool
 
 

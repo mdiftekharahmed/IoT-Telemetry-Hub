@@ -308,6 +308,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if parameter is None:
             raise HTTPException(404, "Parameter not found")
         parameter.enabled = body.enabled
+        parameter.unit = body.unit
         commit(db)
         return parameter
 
@@ -341,6 +342,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             writer.writerow(["timestamp", "device_id", "parameter", "value"])
             yield output.getvalue()
             with app.state.sessions() as db:
+                units = dict(db.execute(select(Parameter.name, Parameter.unit)).all())
                 statement = (
                     select(Telemetry)
                     .where(Telemetry.timestamp >= start, Telemetry.timestamp < end)
@@ -352,11 +354,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         continue
                     output.seek(0)
                     output.truncate(0)
+                    param_display = row.parameter
+                    if units.get(row.parameter):
+                        param_display = f"{row.parameter}({units[row.parameter]})"
                     writer.writerow(
                         [
                             as_utc(row.timestamp).isoformat(),
                             row.device_id,
-                            row.parameter,
+                            param_display,
                             row.value,
                         ]
                     )
@@ -393,8 +398,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         columns = sorted(set(db.scalars(select(Parameter.name))) | set(
             db.scalars(select(Telemetry.parameter).distinct())
         ))
+        units = dict(db.execute(select(Parameter.name, Parameter.unit)).all())
         return {
             "columns": columns,
+            "units": units,
             "records": [{
                 "registry_id": record.id, "device_id": record.device_id,
                 "device_name": name, "timestamp": as_utc(record.timestamp),

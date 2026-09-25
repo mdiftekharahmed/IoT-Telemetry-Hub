@@ -22,6 +22,7 @@ class Device(Base):
 class Parameter(Base):
     __tablename__ = "parameters"
     name: Mapped[str] = mapped_column(String(64), primary_key=True)
+    unit: Mapped[str | None] = mapped_column(String(16), nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
