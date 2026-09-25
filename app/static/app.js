@@ -100,7 +100,7 @@ async function renderData() {
             <td><div class="device-cell"><span class="device-cell-icon">${icon("chip")}</span><div><strong>${esc(rec.device_name || rec.device_id)}</strong><small class="muted">${esc(rec.device_id)}</small></div></div></td>
             <td class="date-cell">${utcDate(rec.timestamp)}</td>
             ${columns.map((c) => `<td class="value-cell">${rec.values[c] !== undefined ? esc(rec.values[c]) : "<span class=\"muted\">—</span>"}</td>`).join("")}
-            <td><span title="${esc(healthTitle(rec))}">${healthBadge(rec.health)}</span></td>
+            <td><div style="display: flex; align-items: center; gap: 8px;" title="${esc(healthTitle(rec))}">${healthBadge(rec.health)}${rec.values["systemTemp"] !== undefined ? `<span class="muted" style="font-size: 0.9em;">${esc(rec.values["systemTemp"])}${rule.unit ? `\u00a0${esc(rule.unit)}` : ""}</span>` : ""}</div></td>
           </tr>`).join("")}</tbody>
         </table>
       </div>` : empty("database", "Your first reading starts here", "Register a device and enable its parameters. Approved readings will appear here as they arrive.", '<a class="button button-outline" href="/devices">Manage devices</a>')}
