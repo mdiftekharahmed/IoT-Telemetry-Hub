@@ -72,10 +72,16 @@ async function renderData() {
   const columns = result.columns.filter((c) => c !== "systemTemp");
   const rule = result.health_rule;
   const actions = `<button class="button button-outline" id="refresh">${icon("refresh")}Refresh</button><a class="button button-dark" href="/export">${icon("download")}Export data</a>`;
-  function healthBadge(health) {
-    if (health === "ok") return `<span class="badge badge-green"><span class="small-dot"></span>OK</span>`;
-    if (health === "not_ok") return `<span class="badge badge-red"><span class="small-dot"></span>Not OK</span>`;
-    return `<span class="badge badge-gray"><span class="small-dot"></span>Unknown</span>`;
+  function healthBadge(rec, rule) {
+    const health = rec.health;
+    const v = rec.values["systemTemp"];
+    let display = "";
+    if (v !== undefined) {
+      display = ` : ${esc(v)}${rule.unit ? esc(rule.unit) : ""}`;
+    }
+    if (health === "ok") return `<span class="badge badge-green"><span class="small-dot"></span>OK${display}</span>`;
+    if (health === "not_ok") return `<span class="badge badge-red"><span class="small-dot"></span>Not OK${display}</span>`;
+    return `<span class="badge badge-gray"><span class="small-dot"></span>Unknown${display}</span>`;
   }
   function healthTitle(rec) {
     const v = rec.values["systemTemp"];
@@ -100,7 +106,7 @@ async function renderData() {
             <td><div class="device-cell"><span class="device-cell-icon">${icon("chip")}</span><div><strong>${esc(rec.device_name || rec.device_id)}</strong><small class="muted">${esc(rec.device_id)}</small></div></div></td>
             <td class="date-cell">${utcDate(rec.timestamp)}</td>
             ${columns.map((c) => `<td class="value-cell">${rec.values[c] !== undefined ? esc(rec.values[c]) + (result.units[c] ? ` <span class="muted" style="font-size: 0.9em;">${esc(result.units[c])}</span>` : "") : "<span class=\"muted\">—</span>"}</td>`).join("")}
-            <td><div style="display: flex; align-items: center; gap: 8px;" title="${esc(healthTitle(rec))}">${healthBadge(rec.health)}${rec.values["systemTemp"] !== undefined ? `<span class="muted" style="font-size: 0.9em;">${esc(rec.values["systemTemp"])}${rule.unit ? `\u00a0${esc(rule.unit)}` : ""}</span>` : ""}</div></td>
+            <td><div style="display: flex; align-items: center; gap: 8px;" title="${esc(healthTitle(rec))}">${healthBadge(rec, rule)}</div></td>
           </tr>`).join("")}</tbody>
         </table>
       </div>` : empty("database", "Your first reading starts here", "Register a device and enable its parameters. Approved readings will appear here as they arrive.", '<a class="button button-outline" href="/devices">Manage devices</a>')}
