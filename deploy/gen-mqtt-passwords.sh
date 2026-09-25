@@ -2,8 +2,7 @@
 # Generate the Mosquitto password file and per-device credentials.
 # Run ONCE from the project root: bash deploy/gen-mqtt-passwords.sh
 #
-# Prerequisites: mosquitto-clients installed on the VM
-#   sudo apt-get install -y mosquitto-clients
+# Prerequisites: Docker must be running (used to run mosquitto_passwd).
 set -euo pipefail
 
 APP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -21,8 +20,11 @@ mkdir -p secrets
 PASSWD_FILE="secrets/mosquitto.passwd"
 
 echo "==> Creating collector credentials (user: ${MQTT_USERNAME:-collector})..."
-# -c creates/overwrites the file; -b takes the password as an argument (non-interactive)
-mosquitto_passwd -c -b "$PASSWD_FILE" "${MQTT_USERNAME:-collector}" "$MQTT_PASSWORD"
+# Use Docker to run mosquitto_passwd — no host broker package needed.
+docker run --rm \
+  -v "$APP_DIR/secrets:/secrets" \
+  eclipse-mosquitto:2 \
+  mosquitto_passwd -c -b /secrets/mosquitto.passwd "${MQTT_USERNAME:-collector}" "$MQTT_PASSWORD"
 
 echo ""
 echo "Per-device credentials:"
