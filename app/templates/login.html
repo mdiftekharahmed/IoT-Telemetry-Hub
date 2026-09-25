@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101b2d">
+  <title>Sign in · Telemetry Hub</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="/static/login.js" defer></script>
+</head>
+<body class="login-page">
+  <main class="login-card">
+    <section class="login-story" aria-label="About Telemetry Hub">
+      <a class="brand brand-light" href="/login"><span class="brand-icon"><svg><use href="/static/icons.svg#tree"/></svg></span><span>Telemetry Hub<small>FIELD DATA, CONNECTED</small></span></a>
+      <div class="story-copy"><span class="eyebrow mint">FROM THE FIELD TO YOUR SCREEN</span><h1>Small sensors.<br>Meaningful<br><span>connections.</span></h1><p>A simpler home for your environmental data. Collect, manage, and explore every approved reading in one place.</p></div>
+      <div class="field-art" aria-hidden="true"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><span class="art-node node-one"></span><span class="art-node node-two"></span><span class="art-node node-three"></span><div class="art-core"><svg><use href="/static/icons.svg#tree"/></svg></div><span class="art-caption">COLLECT &nbsp; / &nbsp; UNDERSTAND &nbsp; / &nbsp; EXPORT</span></div>
+      <div class="story-footer"><svg><use href="/static/icons.svg#shield"/></svg><span>Your field data. In good hands.</span></div>
+    </section>
+    <section class="login-form-panel">
+      <div class="login-form-wrap"><span class="eyebrow">ADMIN WORKSPACE</span><h2>Welcome back.</h2><p class="subtext">Sign in to your telemetry workspace.</p>
+        <form id="login-form">
+          <label for="username">Username</label><div class="input-icon"><svg><use href="/static/icons.svg#user"/></svg><input id="username" name="username" autocomplete="username" placeholder="Enter your username" required maxlength="64"></div>
+          <div class="label-row"><label for="password">Password</label><span>Keep your account secure</span></div>
+          <div class="input-icon"><svg><use href="/static/icons.svg#lock"/></svg><input id="password" name="password" type="password" autocomplete="current-password" placeholder="Enter your password" required maxlength="1024"><button type="button" id="show-password" class="icon-button" aria-label="Show password" aria-pressed="false"><svg><use href="/static/icons.svg#eye"/></svg></button></div>
+          <p id="login-error" class="form-error" role="alert" hidden></p>
+          <button class="button button-dark login-submit" type="submit"><span>Sign in to workspace</span><svg><use href="/static/icons.svg#arrow-right"/></svg></button>
+        </form>
+        <div class="login-help"><svg><use href="/static/icons.svg#shield"/></svg><p>Access is managed by your administrator.<br><span>Contact them if you need help signing in.</span></p></div>
+      </div><div class="login-bottom"><span>TELEMETRY HUB</span><span>Built for a clearer picture.</span></div>
+    </section>
+  </main>
+</body>
+</html>

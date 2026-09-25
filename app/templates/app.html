@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101b2d">
+  <title>Workspace · Telemetry Hub</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <a href="#main" class="skip-link">Skip to content</a>
+  <button id="nav-backdrop" class="nav-backdrop" aria-label="Close navigation" hidden></button>
+  <aside class="sidebar" id="sidebar" aria-label="Main navigation">
+    <a href="/data" class="brand brand-light"><span class="brand-icon"><svg><use href="/static/icons.svg#tree"/></svg></span><span>Telemetry Hub<small>ENVIRONMENTAL DATA</small></span></a>
+    <div class="workspace-label"><span class="small-dot"></span><span id="workspace-name">Admin workspace</span><svg><use href="/static/icons.svg#lock"/></svg></div>
+    <span class="nav-heading">WORKSPACE</span>
+    <nav><a href="/data" data-page="data"><svg><use href="/static/icons.svg#database"/></svg>Stored data</a><a href="/devices" data-page="devices"><svg><use href="/static/icons.svg#chip"/></svg>Devices<span id="nav-device-count" class="nav-count">—</span></a><a href="/parameters" data-page="parameters"><svg><use href="/static/icons.svg#sliders"/></svg>Allowed parameters</a><a href="/export" data-page="export"><svg><use href="/static/icons.svg#download"/></svg>CSV export</a></nav>
+    <div class="sidebar-note"><svg><use href="/static/icons.svg#leaf"/></svg><h3>A little data.<br>A bigger picture.</h3><p>From your sensors to the insights that matter.</p><div class="note-line"></div></div>
+    <div class="sidebar-bottom"><button class="profile" id="edit-profile" aria-label="Edit your profile"><span class="avatar" id="avatar">A</span><span><strong id="admin-name">Administrator</strong><small>Edit your profile</small></span><svg class="profile-edit-icon"><use href="/static/icons.svg#edit"/></svg></button><button id="logout" class="logout"><svg><use href="/static/icons.svg#logout"/></svg>Sign out<svg class="logout-arrow"><use href="/static/icons.svg#arrow-right"/></svg></button></div>
+  </aside>
+  <div class="workspace">
+    <header class="topbar"><div class="breadcrumb"><button id="menu-toggle" class="icon-button mobile-only" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar"><svg><use href="/static/icons.svg#menu"/></svg></button><span>Workspace</span><span class="breadcrumb-slash">/</span><strong id="breadcrumb-page">Stored data</strong></div><div class="topbar-right"><span id="demo-badge" class="badge badge-amber" hidden>Demo data</span><span class="topbar-label"><svg><use href="/static/icons.svg#shield"/></svg>Admin access</span><span class="topbar-avatar" id="topbar-avatar">A</span></div></header>
+    <main id="main" tabindex="-1"><div class="page-loading"><span class="spinner"></span>Opening your workspace…</div></main>
+    <footer class="workspace-footer"><span>Telemetry Hub <span class="footer-dot">·</span> Made for the field.</span><span>Collect. Understand. Export.</span></footer>
+  </div>
+  <div id="toast" class="toast" role="status" hidden></div>
+  <dialog id="form-dialog" aria-labelledby="dialog-title"></dialog>
+</body>
+</html>

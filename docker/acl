@@ -1,0 +1,5 @@
+user collector
+topic read devices/+/telemetry
+
+# Device MQTT username must equal its registered device_id.
+pattern write devices/%u/telemetry
