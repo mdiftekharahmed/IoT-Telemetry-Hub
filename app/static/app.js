@@ -72,23 +72,23 @@ async function renderData() {
   const columns = result.columns.filter((c) => c !== "systemTemp");
   const rule = result.health_rule;
   const actions = `<button class="button button-outline" id="refresh">${icon("refresh")}Refresh</button><a class="button button-dark" href="/export">${icon("download")}Export data</a>`;
-  function healthBadge(rec, rule) {
+  function healthBadge(rec, units) {
     const health = rec.health;
     const v = rec.values["systemTemp"];
     let display = "";
     if (v !== undefined) {
-      display = ` : ${esc(v)}${rule.unit ? esc(rule.unit) : ""}`;
+      const u = units["systemTemp"];
+      display = ` : ${esc(v)}${u ? ` ${esc(u)}` : ""}`;
     }
     if (health === "ok") return `<span class="badge badge-green"><span class="small-dot"></span>OK${display}</span>`;
     if (health === "not_ok") return `<span class="badge badge-red"><span class="small-dot"></span>Not OK${display}</span>`;
     return `<span class="badge badge-gray"><span class="small-dot"></span>Unknown${display}</span>`;
   }
-  function healthTitle(rec) {
+  function healthTitle(rec, units) {
     const v = rec.values["systemTemp"];
     if (v === undefined) return "No systemTemp in this transmission";
-    const parts = [`systemTemp\u202F=\u202F${v}`];
-    if (rule.unit) parts.push(rule.unit);
-    return parts.join("\u00a0");
+    const u = units["systemTemp"];
+    return u ? `systemTemp\u202F=\u202F${v}\u00a0${u}` : `systemTemp\u202F=\u202F${v}`;
   }
   main.innerHTML = heading("YOUR FIELD, IN FOCUS", "Stored data", "A clear view of the readings collected from your sensor devices.", actions) + stats() +
     `<section class="panel">${panelTop("database", "Transmission log", "One row per accepted MQTT message · Newest first", `${icon("clock")} All times in UTC`)}${records.length ?
@@ -106,7 +106,7 @@ async function renderData() {
             <td><div class="device-cell"><span class="device-cell-icon">${icon("chip")}</span><div><strong>${esc(rec.device_name || rec.device_id)}</strong><small class="muted">${esc(rec.device_id)}</small></div></div></td>
             <td class="date-cell">${utcDate(rec.timestamp)}</td>
             ${columns.map((c) => `<td class="value-cell">${rec.values[c] !== undefined ? esc(rec.values[c]) + (result.units[c] ? ` <span class="muted" style="font-size: 0.9em;">${esc(result.units[c])}</span>` : "") : "<span class=\"muted\">—</span>"}</td>`).join("")}
-            <td><div style="display: flex; align-items: center; gap: 8px;" title="${esc(healthTitle(rec))}">${healthBadge(rec, rule)}</div></td>
+            <td><div style="display: flex; align-items: center; gap: 8px;" title="${esc(healthTitle(rec, result.units))}">${healthBadge(rec, result.units)}</div></td>
           </tr>`).join("")}</tbody>
         </table>
       </div>` : empty("database", "Your first reading starts here", "Register a device and enable its parameters. Approved readings will appear here as they arrive.", '<a class="button button-outline" href="/devices">Manage devices</a>')}
