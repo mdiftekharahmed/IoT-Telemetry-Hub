@@ -221,7 +221,7 @@ step "7 / 7 — Create admin user"
 echo ""
 info "You will now set up the first administrator account for the web UI."
 echo ""
-sg docker -c "docker compose exec -it api python -m app.cli create-admin"
+echo "  docker compose exec -it api python -m app.cli <your_username>"
 
 # ── Final summary ─────────────────────────────────────────────
 LOCAL_IP=$(hostname -I | awk '{print $1}')

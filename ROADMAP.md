@@ -55,7 +55,7 @@ publishes a reading; only approved values appear in the data view and CSV.
 - [ ] Create `.env` with real `POSTGRES_PASSWORD`, `MQTT_PASSWORD`, `API_PORT`.
 - [ ] Run `deploy/gen-mqtt-passwords.sh` to produce `secrets/mosquitto.passwd`.
 - [ ] Run `deploy/start.sh` — builds image, runs migrations, starts all services.
-- [ ] `docker compose exec api python -m app.cli create-admin`.
+- [ ] `docker compose exec api python -m app.cli admin`.
 - [ ] Verify `GET /health/ready` → `{"status":"ok"}` and login page loads.
 - [ ] Register a test device, enable a parameter, publish a test MQTT message,
       confirm it appears in Stored Data and downloads correctly via CSV export.

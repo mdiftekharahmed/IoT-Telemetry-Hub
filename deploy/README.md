@@ -65,7 +65,7 @@ This builds the app image, runs Alembic migrations, then starts all services.
 ## 5 — Create the first admin user
 
 ```bash
-docker compose exec api python -m app.cli create-admin
+docker compose exec api python -m app.cli admin
 ```
 
 Follow the prompts to set a username and password.
