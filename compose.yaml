@@ -96,3 +96,4 @@ services:
 volumes:
   postgres-data:
   mqtt-data:
+  caddy-data:
