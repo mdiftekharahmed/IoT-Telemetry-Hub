@@ -1,5 +1,8 @@
 import csv
 import io
+import secrets
+import string
+import subprocess
 from collections.abc import Iterator
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -224,8 +227,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 409, f"Maximum of {settings.max_devices} registered devices reached"
             )
         device = Device(**body.model_dump())
+        
+        # Auto-generate an MQTT password
+        alphabet = string.ascii_letters + string.digits
+        device.mqtt_password = ''.join(secrets.choice(alphabet) for _ in range(16))
+        
         db.add(device)
         commit(db)
+        
+        pw_file = Path("/secrets/mosquitto.passwd")
+        if pw_file.exists():
+            try:
+                subprocess.run(["mosquitto_passwd", "-b", str(pw_file), device.device_id, device.mqtt_password], check=True)
+            except Exception as e:
+                print(f"Warning: failed to update mosquitto password: {e}")
+        
         return device
 
     @app.put("/api/devices/{device_id}", response_model=DeviceOut, tags=["devices"])
@@ -248,6 +264,31 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         db.execute(delete(TelemetryRecord).where(TelemetryRecord.device_id == device_id))
         db.execute(delete(IngestedMessage).where(IngestedMessage.device_id == device_id))
         db.commit()
+        return Response(status_code=204)
+
+    @app.delete("/api/devices/{device_id}", status_code=204, tags=["devices"])
+    def remove_device(device_id: str, auth: Auth, db: DB):
+        """Delete a device and all of its telemetry data."""
+        if db.get(Device, device_id) is None:
+            raise HTTPException(404, "Device not found")
+            
+        # Delete telemetry first (foreign key constraints)
+        db.execute(delete(Telemetry).where(Telemetry.device_id == device_id))
+        db.execute(delete(TelemetryRecord).where(TelemetryRecord.device_id == device_id))
+        db.execute(delete(IngestedMessage).where(IngestedMessage.device_id == device_id))
+        
+        # Delete device
+        db.execute(delete(Device).where(Device.device_id == device_id))
+        db.commit()
+        
+        # Remove MQTT password
+        pw_file = Path("/secrets/mosquitto.passwd")
+        if pw_file.exists():
+            try:
+                subprocess.run(["mosquitto_passwd", "-D", str(pw_file), device_id], check=True)
+            except Exception as e:
+                print(f"Warning: failed to remove mosquitto password: {e}")
+                
         return Response(status_code=204)
 
     @app.get("/api/parameters", response_model=list[ParameterOut], tags=["parameters"])

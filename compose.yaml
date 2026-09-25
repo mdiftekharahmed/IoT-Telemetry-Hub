@@ -31,8 +31,18 @@ services:
     volumes:
       - ./docker/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       - ./docker/acl:/mosquitto/config/acl:ro
-      - ./secrets/mosquitto.passwd:/mosquitto/config/passwords:ro
+      - ./secrets:/secrets:ro
       - mqtt-data:/mosquitto/data
+    command: >
+      /bin/sh -c "
+        mosquitto -c /mosquitto/config/mosquitto.conf &
+        L=\$$(stat -c %Y /secrets/mosquitto.passwd 2>/dev/null || echo 0);
+        while true; do
+          sleep 5;
+          N=\$$(stat -c %Y /secrets/mosquitto.passwd 2>/dev/null || echo 0);
+          if [ \"\$$L\" != \"\$$N\" ]; then kill -HUP %1; L=\"\$$N\"; fi;
+        done
+      "
     restart: unless-stopped
 
   migrate:
@@ -46,6 +56,8 @@ services:
     <<: *app
     ports:
       - "${API_PORT:-8000}:8000"
+    volumes:
+      - ./secrets:/secrets
     depends_on:
       migrate:
         condition: service_completed_successfully

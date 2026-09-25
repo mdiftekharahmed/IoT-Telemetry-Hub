@@ -50,6 +50,7 @@ class DeviceUpdate(InputModel):
 
 class DeviceOut(DeviceCreate):
     model_config = ConfigDict(from_attributes=True)
+    mqtt_password: str | None = None
     created_at: datetime
 
     @field_validator("created_at")

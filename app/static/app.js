@@ -120,7 +120,7 @@ async function renderDevices() {
   const atCapacity = state.devices.length >= state.user.max_devices;
   main.innerHTML = heading("CONNECTED TO THE FIELD", "Your devices", "Manage the sensor devices that send data to your workspace.", `<button class="button button-green" id="add-device" ${atCapacity ? "disabled" : ""}>${icon("plus")}Add device</button>`) + stats() +
     `<section class="panel">${panelTop("chip", "Registered devices", "Enable a device to accept its approved readings", `${state.devices.length} of ${state.user.max_devices} devices`)}${state.devices.length ?
-      `<div class="table-scroll" tabindex="0" aria-label="Devices table"><table><thead><tr><th>Device</th><th>Device ID</th><th>Status</th><th>Registered · UTC</th><th>Actions</th></tr></thead><tbody>${state.devices.map((device) => `<tr><td><div class="device-cell"><span class="device-cell-icon">${icon("chip")}</span><strong>${esc(device.name)}</strong></div></td><td class="mono">${esc(device.device_id)}</td><td><div class="status-control"><button class="toggle" role="switch" aria-checked="${device.enabled}" aria-label="Enable ${esc(device.name)}" data-toggle-device="${esc(device.device_id)}"></button>${status(device.enabled)}</div></td><td class="date-cell">${utcDate(device.created_at, false)}</td><td><div class="row-actions"><button class="button button-ghost" data-edit-device="${esc(device.device_id)}">${icon("edit")}Edit</button><button class="icon-button danger" title="Clear all telemetry data" aria-label="Clear data for ${esc(device.name)}" data-clear-device="${esc(device.device_id)}">${icon("trash")}</button></div></td></tr>`).join("")}</tbody></table></div>` : empty("chip", "Meet your next connection", "Add your first sensor device to start collecting field data.", '<button class="button button-green" id="empty-add">Add your first device</button>')}
+      `<div class="table-scroll" tabindex="0" aria-label="Devices table"><table><thead><tr><th>Device</th><th>Device ID</th><th>MQTT Password</th><th>Status</th><th>Registered · UTC</th><th>Actions</th></tr></thead><tbody>${state.devices.map((device) => `<tr><td><div class="device-cell"><span class="device-cell-icon">${icon("chip")}</span><strong>${esc(device.name)}</strong></div></td><td class="mono">${esc(device.device_id)}</td><td class="mono" style="user-select: all;">${esc(device.mqtt_password || "")}</td><td><div class="status-control"><button class="toggle" role="switch" aria-checked="${device.enabled}" aria-label="Enable ${esc(device.name)}" data-toggle-device="${esc(device.device_id)}"></button>${status(device.enabled)}</div></td><td class="date-cell">${utcDate(device.created_at, false)}</td><td><div class="row-actions"><button class="button button-ghost" data-edit-device="${esc(device.device_id)}">${icon("edit")}Edit</button><button class="icon-button danger" title="Delete device and data" aria-label="Delete ${esc(device.name)}" data-delete-device="${esc(device.device_id)}">${icon("trash")}</button></div></td></tr>`).join("")}</tbody></table></div>` : empty("chip", "Meet your next connection", "Add your first sensor device to start collecting field data.", '<button class="button button-green" id="empty-add">Add your first device</button>')}
       <div class="table-bottom"><span>${atCapacity ? "All device slots are in use" : `${state.user.max_devices - state.devices.length} device slots available`}</span><span>Up to ${state.user.max_devices} devices per workspace</span></div></section>` +
     info("<strong>You're in control.</strong> Disabling a device stops new readings from being stored. Its previously collected data stays available. Use the trash icon to permanently delete all telemetry data for a device.");
   document.querySelector("#add-device").onclick = () => deviceForm();
@@ -132,7 +132,7 @@ async function renderDevices() {
     try { await api(`/api/devices/${encodeURIComponent(device.device_id)}`, {method: "PUT", body: JSON.stringify({name: device.name, enabled: !device.enabled})}); await loadPage(); toast(`Device ${device.enabled ? "disabled" : "enabled"}.`); }
     catch (error) { toast(error.message, true); button.disabled = false; }
   });
-  main.querySelectorAll("[data-clear-device]").forEach((button) => button.onclick = () => clearDeviceData(state.devices.find((d) => d.device_id === button.dataset.clearDevice)));
+  main.querySelectorAll("[data-delete-device]").forEach((button) => button.onclick = () => deleteDevice(state.devices.find((d) => d.device_id === button.dataset.deleteDevice)));
 }
 async function renderParameters() {
   state.parameters = await api("/api/parameters");
@@ -185,19 +185,20 @@ function removeParameter(name) {
     await api(`/api/parameters/${encodeURIComponent(name)}`, {method: "DELETE"}); toast("Parameter removed. Historical data is unchanged.");
   }, true);
 }
-function clearDeviceData(device) {
+function deleteDevice(device) {
   modal(
-    "Clear all telemetry data?",
-    `<p>This will permanently delete <strong>all stored readings</strong> for <strong>${esc(device.name)}</strong> (<code>${esc(device.device_id)}</code>).</p>
+    "Delete device and all data?",
+    `<p>This will permanently delete <strong>${esc(device.name)}</strong> (<code>${esc(device.device_id)}</code>) and <strong>all its stored readings</strong>.</p>
     <ul class="clear-data-list">
       <li>${icon("database")}All telemetry readings and transmission records</li>
-      <li>${icon("refresh")}The deduplication history (allows the device to re-send old message IDs)</li>
+      <li>${icon("chip")}The device registration and MQTT credentials</li>
     </ul>
-    <p>The device registration, its name, and its enabled state are <strong>not</strong> affected. This action cannot be undone.</p>`,
-    "Delete all data",
+    <p>This action cannot be undone.</p>`,
+    "Delete device",
     async () => {
-      await api(`/api/devices/${encodeURIComponent(device.device_id)}/telemetry`, {method: "DELETE"});
-      toast(`All telemetry data for ${device.name} has been deleted.`);
+      await api(`/api/devices/${encodeURIComponent(device.device_id)}`, {method: "DELETE"});
+      toast(`${device.name} and its data have been deleted.`);
+
     },
     true
   );
