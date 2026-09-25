@@ -7,7 +7,7 @@ const state = {user: null, summary: null, devices: [], parameters: [], cursor: n
 const icon = (name, css = "") => `<svg class="${css}" aria-hidden="true"><use href="/static/icons.svg#${name}"/></svg>`;
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[char]));
 const number = (value) => Number(value).toLocaleString("en-US");
-const utcDate = (value, time = true) => value ? new Date(value).toLocaleString("en-GB", {timeZone: "UTC", day: "2-digit", month: "short", year: "numeric", ...(time ? {hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false} : {})}) : "—";
+const utcDate = (value, time = true) => value ? new Date(value).toLocaleString("en-GB", {timeZone: "UTC", day: "2-digit", month: "2-digit", year: "numeric", ...(time ? {hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false} : {})}) : "—";
 let toastTimer;
 
 async function api(path, options = {}) {
