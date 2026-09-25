@@ -2,7 +2,7 @@
 	auto_https disable_redirects
 }
 
-:8443 {
+100.108.219.54:8443 {
 	tls internal
 	reverse_proxy api:8000
 }
