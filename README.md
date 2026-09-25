@@ -12,7 +12,7 @@ A production-ready backend for IoT devices, featuring an authenticated managemen
 
 ---
 
-## 🚀 Full Installation Process
+## Full Installation Process
 
 To install and run the full backend (including the PostgreSQL database, MQTT broker, and API) on a fresh Linux server (e.g., Ubuntu), use the automated `install.sh` script.
 
@@ -32,7 +32,7 @@ To install and run the full backend (including the PostgreSQL database, MQTT bro
 
 ---
 
-## 📡 Device Registration & ESP32 Preparation
+## Device Registration & ESP32 Preparation
 
 To get an ESP32 node sending data to your server, you need to register it in both the Web Dashboard and the MQTT Broker. 
 
@@ -163,7 +163,7 @@ void loop() {
 
 ---
 
-## 🛠 Advanced / Developer Notes
+## Advanced / Developer Notes
 
 - **Docker Development Stack**: To run locally on Windows/Mac, copy `.env.example` to `.env`, create a `secrets/mosquitto.passwd` file using the mosquitto container, and run `docker compose up --build -d`.
 - **API Surface**: The FastAPI documentation is available at `/docs` when the server is running. All data operations are secured behind Bearer token authentication.
