@@ -36,7 +36,7 @@ function stat(label, value, foot, symbol, color = "", suffix = "") {
 }
 function stats() {
   const s = state.summary;
-  return `<section class="stats-grid" aria-label="Workspace overview">${stat("Registered devices", number(s.devices), `<span class="green">${s.enabled_devices} enabled</span> to receive data`, "chip", "", `/ ${state.user.max_devices}`)}${stat("Allowed parameters", number(s.enabled_parameters), "Enabled in your global whitelist", "sliders", "blue")}${stat("Stored readings", number(s.readings), "Approved values, safely collected", "database", "purple")}</section>`;
+  return `<section class="stats-grid" aria-label="Workspace overview">${stat("Registered devices", number(s.devices), `<span class="green">${s.enabled_devices} enabled</span> to receive data`, "chip", "", `/ ${state.user.max_devices}`)}${stat("Allowed parameters", number(s.enabled_parameters), "Enabled in your global whitelist", "sliders", "blue")}${stat("Stored readings", number(s.records), "Approved values, safely collected", "database", "purple")}</section>`;
 }
 function empty(symbol, title, description, action = "") {
   return `<div class="empty-state"><div class="empty-icon">${icon(symbol)}</div><h3>${title}</h3><p>${description}</p>${action}</div>`;
