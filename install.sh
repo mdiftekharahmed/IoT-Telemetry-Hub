@@ -143,7 +143,7 @@ cat > "$APP_DIR/.env" <<ENVEOF
 # Application
 SESSION_TTL_HOURS=12
 MAX_DEVICES=10
-SECURE_COOKIES=false
+SECURE_COOKIES=true
 DEMO_MODE=false
 
 # API port
@@ -183,6 +183,23 @@ info "To add a device credential after registration run:"
 echo "  mosquitto_passwd -b $APP_DIR/secrets/mosquitto.passwd <device_id> <password>"
 echo "  docker compose -f $APP_DIR/compose.yaml restart mosquitto"
 
+# ── 5.5. Generate self-signed certificate for Caddy ───────────
+step "5.5 / 7 — HTTPS Certificate"
+
+LOCAL_IP=$(hostname -I | awk '{print $1}')
+mkdir -p "$APP_DIR/docker"
+if [ ! -f "$APP_DIR/docker/cert.pem" ]; then
+  info "Generating self-signed certificate for $LOCAL_IP..."
+  openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+    -keyout "$APP_DIR/docker/key.pem" \
+    -out "$APP_DIR/docker/cert.pem" \
+    -subj "/CN=${LOCAL_IP}"
+  chmod 644 "$APP_DIR/docker/cert.pem" "$APP_DIR/docker/key.pem"
+  success "Generated self-signed certificate"
+else
+  success "Certificate already exists"
+fi
+
 # ── 6. Build and start the stack ─────────────────────────────
 step "6 / 7 — Docker Compose stack"
 
@@ -202,7 +219,7 @@ sg docker -c "docker compose up -d --remove-orphans"
 info "Waiting for API to become healthy..."
 MAX_WAIT=120
 ELAPSED=0
-until curl -sf "http://127.0.0.1:${API_PORT}/health/ready" | grep -q '"ok"'; do
+until curl -skf "https://${LOCAL_IP}/health/ready" | grep -q '"ok"'; do
   if [ "$ELAPSED" -ge "$MAX_WAIT" ]; then
     warn "API did not become healthy in ${MAX_WAIT}s. Showing recent logs:"
     sg docker -c "docker compose logs --tail=50"
@@ -232,9 +249,9 @@ echo "  ╔═══════════════════════
 echo "  ║            🎉  Deployment complete!                      ║"
 echo "  ╚══════════════════════════════════════════════════════════╝"
 echo -e "${RESET}"
-echo -e "  ${BOLD}Web UI    :${RESET}  http://${LOCAL_IP}:${API_PORT}"
-echo -e "  ${BOLD}Health    :${RESET}  http://${LOCAL_IP}:${API_PORT}/health/ready"
-echo -e "  ${BOLD}Login     :${RESET}  http://${LOCAL_IP}:${API_PORT}/login"
+echo -e "  ${BOLD}Web UI    :${RESET}  https://${LOCAL_IP}"
+echo -e "  ${BOLD}Health    :${RESET}  https://${LOCAL_IP}/health/ready"
+echo -e "  ${BOLD}Login     :${RESET}  https://${LOCAL_IP}/login"
 echo ""
 echo -e "  ${BOLD}App dir   :${RESET}  $APP_DIR"
 echo -e "  ${BOLD}Logs      :${RESET}  cd $APP_DIR && docker compose logs -f api"
