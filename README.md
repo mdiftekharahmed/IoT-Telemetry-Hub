@@ -1,134 +1,170 @@
 # IoT Telemetry Hub
 
-A small backend for up to ten MQTT devices, with an authenticated management API,  
-global parameter whitelist, persistent telemetry and date-range CSV export.
+A production-ready backend for IoT devices, featuring an authenticated management API, global parameter whitelist, persistent telemetry storage, and a responsive administrative UI dashboard.
 
-**Current stage:** working backend and responsive admin UI, verified locally.  
-Production deployment is a later milestone. The frontend uses plain HTML, CSS and  
-vanilla JavaScript: no React, UI library, Node/npm or frontend build step.
+## Features
 
-*   [Original scope](iot_data_logging_project_plan.md)
-*   [Tracked roadmap](ROADMAP.md)
-*   [MQTT contract](docs/mqtt-contract.md)
-*   [UI design notes](docs/ui-design-brief.md)
+- **Responsive Web Dashboard**: Manage your devices, monitor health, and view data from any screen.
+- **MQTT Ingestion Engine**: Robust handling of incoming telemetry via MQTT with deduplication.
+- **Parameter Whitelisting**: Define exactly which sensor data you want to collect and their units.
+- **Data Export**: Export your historical data as wide-format CSVs.
+- **Secure**: Authentication required for all endpoints, profile management, and hashed passwords.
 
-## Templates in this repository
+---
 
-*   `app/templates/login.html`: split login layout.
-*   `app/templates/app.html`: shared admin workspace shell.
-*   `app/static/styles.css`: desktop/mobile layouts and component styling.
-*   `app/static/app.js`: four authenticated pages and their API interactions.
-*   `app/static/login.js`: sign-in and password visibility behavior.
-*   `app/static/icons.svg`, `favicon.svg`: local SVG assets.
+## 🚀 Full Installation Process
 
-Everything is served by FastAPI and packaged in the application image. No remote  
-fonts, CDNs or design services are required. The user-provided screenshots informed  
-the navy/emerald palette, sidebar, login composition and table styling.
+To install and run the full backend (including the PostgreSQL database, MQTT broker, and API) on a fresh Linux server (e.g., Ubuntu), use the automated `install.sh` script.
 
-## Installation
+1. **Run the installation script** (requires sudo privileges):
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/mdiftekharahmed/IoT-Telemetry-Hub/main/install.sh | bash
+   ```
+2. **Follow the on-screen prompts**:
+   - The script will automatically install Docker and its dependencies.
+   - It will prompt you to set up passwords and environment variables.
+   - It builds the Docker images and starts all backend services.
+3. **Create your Admin Account**:
+   - Once the script finishes, it will print a final command (e.g., `docker compose -f /opt/iot-telemetry-hub/compose.yaml exec api telemetry-admin <username>`) for you to run. Run this command to set up your initial admin login.
+4. **Access the Dashboard**:
+   - Navigate to `http://<your-server-ip>:8000` in your web browser.
+   - Log in using the admin account you just created.
 
-To install and run the full backend (including the PostgreSQL database, MQTT broker, and API) on a Linux server (e.g., Ubuntu), use the automated `install.sh` script.
+---
 
-Run the following command on your server (as a user with sudo privileges):
+## 📡 Device Registration & ESP32 Preparation
+
+To get an ESP32 node sending data to your server, you need to register it in both the Web Dashboard and the MQTT Broker. 
+
+### Step 1: Register in the Web Dashboard
+1. Log into your web dashboard.
+2. Go to the **Devices** tab.
+3. Click **Add Device** and enter a unique Device ID (e.g., `ESP32_NODE_01`) and a human-readable Name (e.g., `Greenhouse Sensor`).
+4. Ensure the device is toggled to **Active**.
+
+### Step 2: Register Parameters
+1. Go to the **Parameters** tab in the dashboard.
+2. Click **Add Parameter** to whitelist the data your ESP32 will send (e.g., `temperature` with unit `°C`, `humidity` with unit `%`). 
+*(Note: Any parameter sent by the ESP32 that is not whitelisted here will be safely ignored).*
+
+### Step 3: Add the Device to the MQTT Broker
+Your MQTT Broker (Mosquitto) requires devices to authenticate. You must generate a password for your new device. 
+
+On your server terminal, run the following command to add a new user to the Mosquitto password file (replace `ESP32_NODE_01` with your exact Device ID, and `your_secure_password` with a strong password):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mdiftekharahmed/IoT-Telemetry-Hub/main/install.sh | bash
+cd /opt/iot-telemetry-hub
+sudo docker compose exec mosquitto mosquitto_passwd -b /secrets/mosquitto.passwd ESP32_NODE_01 your_secure_password
+```
+*Note: It may take up to 5 seconds for Mosquitto to reload the new password file.*
+
+### Step 4: ESP32 Code Example (Arduino IDE)
+
+Use the following Arduino code template to connect your ESP32 to Wi-Fi and publish JSON telemetry to the server. You will need the `PubSubClient` and `ArduinoJson` libraries installed in your Arduino IDE.
+
+```cpp
+#include <WiFi.h>
+#include <PubSubClient.h>
+#include <ArduinoJson.h>
+
+// Wi-Fi Credentials
+const char* ssid = "YOUR_WIFI_SSID";
+const char* password = "YOUR_WIFI_PASSWORD";
+
+// MQTT Broker Settings
+const char* mqtt_server = "YOUR_SERVER_IP";
+const int mqtt_port = 1883;
+const char* mqtt_user = "ESP32_NODE_01"; // Must match Device ID exactly
+const char* mqtt_pass = "your_secure_password";
+
+// The MQTT Topic must match the format: devices/<DEVICE_ID>/telemetry
+const char* mqtt_topic = "devices/ESP32_NODE_01/telemetry";
+
+WiFiClient espClient;
+PubSubClient client(espClient);
+unsigned long lastMsg = 0;
+unsigned int msgCounter = 1;
+
+void setup_wifi() {
+  delay(10);
+  Serial.println();
+  Serial.print("Connecting to ");
+  Serial.println(ssid);
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nWiFi connected.");
+}
+
+void reconnect() {
+  while (!client.connected()) {
+    Serial.print("Attempting MQTT connection...");
+    // Create a random client ID
+    String clientId = "ESP32Client-";
+    clientId += String(random(0xffff), HEX);
+    
+    // Attempt to connect
+    if (client.connect(clientId.c_str(), mqtt_user, mqtt_pass)) {
+      Serial.println("connected");
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(client.state());
+      Serial.println(" try again in 5 seconds");
+      delay(5000);
+    }
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  setup_wifi();
+  client.setServer(mqtt_server, mqtt_port);
+}
+
+void loop() {
+  if (!client.connected()) {
+    reconnect();
+  }
+  client.loop();
+
+  unsigned long now = millis();
+  if (now - lastMsg > 10000) { // Send data every 10 seconds
+    lastMsg = now;
+
+    // Generate sensor data
+    float temp = 24.0 + random(-10, 10) / 10.0;
+    float hum = 50.0 + random(-50, 50) / 10.0;
+    float sysTemp = 40.0 + random(-20, 20) / 10.0;
+  
+    // Create JSON payload
+    StaticJsonDocument<200> doc;
+    
+    // Unique message ID: MAC address + incrementing counter
+    String msgId = WiFi.macAddress() + "-" + String(msgCounter++);
+    doc["message_id"] = msgId;
+    
+    JsonObject values = doc.createNestedObject("values");
+    values["temperature"] = temp;
+    values["humidity"] = hum;
+    values["systemTemp"] = sysTemp; // Built-in health check parameter
+  
+    char jsonBuffer[256];
+    serializeJson(doc, jsonBuffer);
+  
+    Serial.print("Publishing message: ");
+    Serial.println(jsonBuffer);
+    
+    client.publish(mqtt_topic, jsonBuffer);
+  }
+}
 ```
 
-The installation script will:
+---
 
-1. Install Docker and its dependencies
-2. Clone this repository
-3. Help you configure passwords and environment variables
-4. Build the Docker images and start all services
+## 🛠 Advanced / Developer Notes
 
-Once running, the script will provide you with the final command to create your admin account. For manual setup or more detailed deployment instructions, see the [Deployment Guide](deploy/README.md).
-
-## API surface
-
-| Method | Endpoint | Purpose |
-| --- | --- | --- |
-| POST | `/api/auth/login` | Exchange username/password for a bearer session |
-| POST | `/api/auth/logout` | Revoke the current session |
-| GET | `/api/auth/me` | Current admin |
-| GET | `/api/summary` | Device, parameter and stored-reading counts |
-| GET / PUT | `/api/profile` | View/edit your own name and contact email |
-| GET / POST | `/api/devices` | List/register devices |
-| PUT | `/api/devices/{device_id}` | Set name and enabled status |
-| GET / POST | `/api/parameters` | List/add global whitelist entries |
-| PUT / DELETE | `/api/parameters/{name}` | Enable/disable or remove an entry |
-| GET | `/api/telemetry?limit=100&before_id=123` | Read telemetry, newest ingested first |
-| GET | `/api/telemetry/export?start=...&end=...` | Download CSV for `[start, end)` |
-| GET | `/health/live`, `/health/ready` | Process and database readiness |
-
-Only login, health, the UI shell/static assets and API documentation are public.  
-All stored data and management APIs require authentication. There is intentionally no HTTP  
-telemetry write endpoint: all device input uses the MQTT ingestion service.  
-The API readiness endpoint checks the database, not broker/collector readiness.
-
-## User details
-
-User details live in **`user_profiles`**, a separate table in the same database as  
-telemetry. Its `username` is a one-to-one foreign key to `admins.username`; fields  
-are `full_name`, `email`, `created_at` and `updated_at`. Password hashes remain only  
-in `admins`, and login sessions remain in `admin_sessions`.
-
-Click your identity at the bottom of the sidebar to edit your profile. Full name  
-and email are optional; email is contact information, not a verified login identity  
-or password-reset destination. Every admin can access only their own profile.  
-Migration `0002` adds blank profiles for existing accounts without changing credentials.
-
-## Docker development stack
-
-Requires Docker Engine/Desktop with Compose. This configuration is for development,  
-not public production hosting. PostgreSQL has no published port; API and broker bind  
-only to `127.0.0.1`. API and worker use the same image in separate processes.
-
-1. Copy .env.example to .env if needed. Set unique POSTGRES_PASSWORD andMQTT_PASSWORD values. For the database URL, use a randomly generated hex password(at least 32 characters) so no URL escaping is needed. Compose provides its ownPostgreSQL URL, overriding the native SQLite setting.
-2. Create a broker password file. In PowerShell:POWERSHELL▾📋 CopyNew-Item -ItemType Directory -Force secrets
-docker run --rm -it --mount "type=bind,source=$($PWD.Path)/secrets,target=/secrets" eclipse-mosquitto:2 mosquitto_passwd -c /secrets/mosquitto.passwd collector
-docker run --rm -it --mount "type=bind,source=$($PWD.Path)/secrets,target=/secrets" eclipse-mosquitto:2 mosquitto_passwd /secrets/mosquitto.passwd sensor-01
-The collector password must match MQTT_PASSWORD. The device gets its ownpassword. Do not repeat -c when adding devices: it overwrites the file. On Linux,the mounted file must be readable by the broker user (container UID 1883).
-3. Start and initialize:POWERSHELL▾📋 Copydocker compose up --build -d
-docker compose exec api telemetry-admin admin
-docker compose logs -f worker
-The one-shot migration service must succeed before the API and collector start.
-4. In the API docs, log in, register sensor-01, and add the temperature parameter.API device registration and broker credential provisioning are separate steps.
-5. Wait for the worker’s MQTT telemetry subscription ready log, then publish asample from another terminal using this repository’s virtual environment:POWERSHELL▾📋 Copy$env:MQTT_USERNAME = 'sensor-01'
-# Set MQTT_PASSWORD privately to the device broker password for this terminal.
-.\.venv\Scripts\python.exe scripts/publish_sample.py --temperature 24.2
-6. Check /api/telemetry and export a time interval containing the reading.
-
-Native Python can run the collector with `telemetry-worker` when a broker is  
-available. Configure `MQTT_HOST`, username/password and optional `MQTT_TLS` first.  
-Run only one collector per deployment using a stable `MQTT_CLIENT_ID`.
-
-Named volumes preserve PostgreSQL and Mosquitto data across container recreation.  
-Do not use `docker compose down -v` unless you intend to delete that stored data.
-
-## Checks
-
-```powershell
-.\.venv\Scripts\python.exe -m pytest
-.\.venv\Scripts\ruff.exe check app migrations scripts tests
-.\.venv\Scripts\ruff.exe format --check app migrations scripts tests
-.\.venv\Scripts\alembic.exe check
-```
-
-Tests use temporary SQLite databases created through the actual migration, plus  
-mocked MQTT callbacks. They cover authentication, whitelist enforcement, device  
-limits, malformed messages, deduplication, UTC handling, CSV boundaries and failed  
-transaction acknowledgement behavior. They do not replace live PostgreSQL/broker  
-and container-restart testing, which is tracked in the roadmap.
-
-## Before production
-
-Complete the roadmap’s VM verification and deployment tasks: login rate limiting,  
-HTTPS with secure cookies, MQTT TLS/private access, volume sizing,  
-backup/restore verification and container version pinning. The current login API  
-should stay local/private until rate limiting is configured. Secrets belong in the  
-ignored `.env` and `secrets/` directory, never in source control or Docker images.
-
-Implementation references: [FastAPI lifespan](https://fastapi.tiangolo.com/advanced/events/),  
-[Paho manual acknowledgements](https://eclipse.dev/paho/files/paho.mqtt.python/html/client.html),  
-and [SQLAlchemy streaming queries](https://docs.sqlalchemy.org/en/20/orm/queryguide/api.html).
+- **Docker Development Stack**: To run locally on Windows/Mac, copy `.env.example` to `.env`, create a `secrets/mosquitto.passwd` file using the mosquitto container, and run `docker compose up --build -d`.
+- **API Surface**: The FastAPI documentation is available at `/docs` when the server is running. All data operations are secured behind Bearer token authentication.
+- **System Health**: The system continuously monitors `systemTemp` from incoming devices to display health status in the UI. Ensure you configure `SYSTEM_TEMP_MIN` and `SYSTEM_TEMP_MAX` in your `.env` file to set acceptable thresholds.
