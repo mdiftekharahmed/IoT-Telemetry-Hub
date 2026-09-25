@@ -87,7 +87,9 @@ step "1 / 7 — System packages"
 
 sudo apt-get update -qq
 sudo apt-get install -y -qq \
-  ca-certificates curl gnupg lsb-release git
+  ca-certificates curl gnupg lsb-release git mosquitto
+sudo systemctl stop mosquitto 2>/dev/null || true
+sudo systemctl disable mosquitto 2>/dev/null || true
 success "Base packages installed"
 
 # ── 2. Docker Engine ──────────────────────────────────────────
@@ -172,12 +174,8 @@ success ".env written (mode 600)"
 step "5 / 7 — MQTT credentials"
 
 mkdir -p "$APP_DIR/secrets"
-# Use the Docker image to generate the password file — avoids needing the
-# host 'mosquitto' broker package (mosquitto_passwd is NOT in mosquitto-clients).
-docker run --rm \
-  -v "$APP_DIR/secrets:/secrets" \
-  eclipse-mosquitto:2 \
-  mosquitto_passwd -c -b /secrets/mosquitto.passwd collector "$MQTT_PASS"
+# mosquitto_passwd is provided by the 'mosquitto' package (installed in step 1)
+mosquitto_passwd -c -b "$APP_DIR/secrets/mosquitto.passwd" collector "$MQTT_PASS"
 chmod 600 "$APP_DIR/secrets/mosquitto.passwd"
 success "secrets/mosquitto.passwd created (collector user)"
 
