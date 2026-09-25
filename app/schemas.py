@@ -107,7 +107,7 @@ class ProfileOut(ProfileUpdate):
 
 
 class TelemetryPayload(InputModel):
-    message_id: UUID = Field(default_factory=uuid4)
+    message_id: str = Field(min_length=1, max_length=36)
     timestamp: AwareDatetime | None = None
     values: dict[ParameterName, float] = Field(min_length=1, max_length=100)
 
