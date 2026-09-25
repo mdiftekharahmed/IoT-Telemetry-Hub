@@ -20,13 +20,21 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.db import build_engine, session_factory
-from app.models import (
-    Admin, AdminSession, Device, IngestedMessage, Parameter, Telemetry, TelemetryRecord,
-    UserProfile, utcnow,
-)
 from app.health import device_health
+from app.models import (
+    Admin,
+    AdminSession,
+    Device,
+    IngestedMessage,
+    Parameter,
+    Telemetry,
+    TelemetryRecord,
+    UserProfile,
+    utcnow,
+)
 from app.schemas import (
     DeviceCreate,
+    DeviceCreateOut,
     DeviceOut,
     DeviceUpdate,
     Login,
@@ -215,7 +223,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def devices(auth: Auth, db: DB):
         return db.scalars(select(Device).order_by(Device.device_id)).all()
 
-    @app.post("/api/devices", response_model=DeviceOut, status_code=201, tags=["devices"])
+    @app.post("/api/devices", response_model=DeviceCreateOut, status_code=201, tags=["devices"])
     def add_device(body: DeviceCreate, auth: Auth, db: DB):
         # Serialize capacity checks across API workers on PostgreSQL.
         if db.bind.dialect.name == "postgresql":
@@ -233,15 +241,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         device.mqtt_password = ''.join(secrets.choice(alphabet) for _ in range(16))
         
         db.add(device)
-        commit(db)
         
         pw_file = Path("/secrets/mosquitto.passwd")
         if pw_file.exists():
             try:
                 subprocess.run(["mosquitto_passwd", "-b", str(pw_file), device.device_id, device.mqtt_password], check=True)
             except Exception as e:
-                print(f"Warning: failed to update mosquitto password: {e}")
+                db.rollback()
+                raise HTTPException(500, f"Failed to update mosquitto password: {e}")
         
+        commit(db)
         return device
 
     @app.put("/api/devices/{device_id}", response_model=DeviceOut, tags=["devices"])
@@ -279,7 +288,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         
         # Delete device
         db.execute(delete(Device).where(Device.device_id == device_id))
-        db.commit()
         
         # Remove MQTT password
         pw_file = Path("/secrets/mosquitto.passwd")
@@ -287,8 +295,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             try:
                 subprocess.run(["mosquitto_passwd", "-D", str(pw_file), device_id], check=True)
             except Exception as e:
-                print(f"Warning: failed to remove mosquitto password: {e}")
+                db.rollback()
+                raise HTTPException(500, f"Failed to remove mosquitto password: {e}")
                 
+        db.commit()
         return Response(status_code=204)
 
     @app.get("/api/parameters", response_model=list[ParameterOut], tags=["parameters"])
@@ -307,8 +317,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         parameter = db.get(Parameter, name)
         if parameter is None:
             raise HTTPException(404, "Parameter not found")
-        parameter.enabled = body.enabled
-        parameter.unit = body.unit
+        for key, value in body.model_dump(exclude_unset=True).items():
+            setattr(parameter, key, value)
         commit(db)
         return parameter
 
@@ -341,7 +351,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             writer = csv.writer(output)
             
             with app.state.sessions() as db:
-                columns = sorted(set(db.scalars(select(Parameter.name))) | set(db.scalars(select(Telemetry.parameter).distinct())))
+                columns = sorted(set(db.scalars(select(Parameter.name).where(Parameter.enabled.is_(True)))) | set(db.scalars(select(Telemetry.parameter).distinct())))
                 if "systemTemp" in columns:
                     columns.remove("systemTemp")
                 units = dict(db.execute(select(Parameter.name, Parameter.unit)).all())
@@ -375,10 +385,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                             writer.writerow([current_row.get(col, "") for col in ["timestamp", "device_id", "device_name"] + columns])
                             yield output.getvalue()
                         current_record_id = record.id
+                        safe_name = device_name or ""
+                        if safe_name.startswith(("=", "+", "-", "@", "\t", "\r")):
+                            safe_name = f"'{safe_name}"
+                        
                         current_row = {
                             "timestamp": as_utc(record.timestamp).isoformat(),
                             "device_id": record.device_id,
-                            "device_name": device_name or "",
+                            "device_name": safe_name,
                         }
                     current_row[param] = val
                     

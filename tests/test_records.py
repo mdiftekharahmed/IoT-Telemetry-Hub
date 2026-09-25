@@ -1,10 +1,8 @@
-﻿'''Tests for grouped transmission records, device health, and CSV exclusion.'''
+'''Tests for grouped transmission records, device health, and CSV exclusion.'''
 import csv
 import io
 import json
 from uuid import uuid4
-
-import pytest
 
 from app.config import Settings
 from app.ingestion import ingest
@@ -143,7 +141,7 @@ def test_health_with_only_max_threshold():
 
 def test_csv_excludes_system_temp(seeded, authenticated_client):
     '''systemTemp readings must never appear in exported CSV rows.'''
-    authenticated_client.post('/api/parameters', json={'name': 'systemTemp'})
+    authenticated_client.post('/api/parameters', json={'name': 'systemTemp', 'enabled': True})
     ingest(
         seeded, TOPIC,
         _payload({'temperature': 22.5, 'systemTemp': 42.0}, timestamp='2026-09-25T10:00:00Z'),
@@ -155,14 +153,15 @@ def test_csv_excludes_system_temp(seeded, authenticated_client):
     )
     assert response.status_code == 200
     rows = list(csv.DictReader(io.StringIO(response.text)))
-    parameters = {r['parameter'] for r in rows}
-    assert 'systemTemp' not in parameters
-    assert 'temperature' in parameters
+    columns = response.text.split('\r\n')[0].split(',')
+    assert 'systemTemp' not in columns
+    assert 'temperature' in columns
+    assert rows[0]['temperature'] == '22.5'
 
 
 def test_csv_only_system_temp_yields_header_only(seeded, authenticated_client):
     '''If the only parameter in the range is systemTemp, the export is header-only.'''
-    authenticated_client.post('/api/parameters', json={'name': 'systemTemp'})
+    authenticated_client.post('/api/parameters', json={'name': 'systemTemp', 'enabled': True})
     authenticated_client.put('/api/parameters/temperature', json={'enabled': False})
     ingest(
         seeded, TOPIC,
@@ -174,4 +173,5 @@ def test_csv_only_system_temp_yields_header_only(seeded, authenticated_client):
         params={'start': '2026-09-25T00:00:00Z', 'end': '2026-09-26T00:00:00Z'},
     )
     assert response.status_code == 200
-    assert response.text == 'timestamp,device_id,parameter,value\r\n'
+    assert response.text == 'timestamp,device_id,device_name\r\n'
+

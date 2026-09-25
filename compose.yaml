@@ -54,10 +54,23 @@ services:
       db:
         condition: service_healthy
 
+  proxy:
+    image: caddy:2-alpine
+    ports:
+      - "443:8443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
   api:
     <<: *app
-    ports:
-      - "${API_PORT:-8000}:8000"
+    # Internal port only, exposed via Caddy
+    expose:
+      - "8000"
     volumes:
       - ./secrets:/secrets
     depends_on:

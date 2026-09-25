@@ -100,7 +100,7 @@ def test_parameter_conflict(seeded, authenticated_client):
         == 409
     )
     assert authenticated_client.get("/api/parameters").json() == [
-        {"name": "temperature", "enabled": True}
+        {"name": "temperature", "enabled": True, "unit": None}
     ]
 
 
@@ -124,7 +124,7 @@ def test_export_dates_pagination_and_empty_range(seeded, authenticated_client):
     assert len(records) == 2
     assert records[0]["timestamp"] == "2026-09-25T10:00:00+00:00"
     assert records[0]["device_id"] == "sensor-01"
-    assert records[0]["value"] == "23.5"
+    assert records[0]["temperature"] == "23.5"
     empty = client.get(
         "/api/telemetry/export",
         params={
@@ -132,7 +132,7 @@ def test_export_dates_pagination_and_empty_range(seeded, authenticated_client):
             "end": "2025-01-02T00:00:00Z",
         },
     )
-    assert empty.text == "timestamp,device_id,parameter,value\r\n"
+    assert empty.text == "timestamp,device_id,device_name,temperature\r\n"
 
 
 @pytest.mark.parametrize(
@@ -164,6 +164,7 @@ def test_health(client):
 def test_clear_device_telemetry_removes_all_data(seeded, authenticated_client):
     """Clearing device telemetry deletes readings, records, and receipts."""
     from sqlalchemy import func, select
+
     from app.ingestion import ingest
     from app.models import IngestedMessage, Telemetry, TelemetryRecord
 
@@ -220,6 +221,7 @@ def test_clear_device_telemetry_allows_reingest_same_message_id(seeded, authenti
 def test_clear_device_telemetry_only_affects_target_device(seeded, authenticated_client):
     """Clearing one device must not touch another device's data."""
     from sqlalchemy import func, select
+
     from app.ingestion import ingest
     from app.models import Telemetry
 

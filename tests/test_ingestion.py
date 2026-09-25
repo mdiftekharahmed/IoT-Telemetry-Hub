@@ -78,7 +78,7 @@ def test_invalid_values_do_not_write(seeded, values):
         b"[]",
         b"{}",
         b"x" * 16385,
-        b'{"message_id":"invalid","values":{"temperature":2}}',
+        b'{"message_id":"","values":{"temperature":2}}',
         b'{"message_id":"a","message_id":"b","values":{"temperature":2}}',
     ],
 )

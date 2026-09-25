@@ -1,7 +1,6 @@
 """Add mqtt_password to devices"""
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision = '8c5a1813525a'
 down_revision = '0003'

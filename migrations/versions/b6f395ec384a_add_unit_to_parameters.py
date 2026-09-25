@@ -1,7 +1,6 @@
 """add unit to parameters"""
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision = 'b6f395ec384a'
 down_revision = '8c5a1813525a'

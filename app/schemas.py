@@ -2,7 +2,6 @@ import math
 import re
 from datetime import UTC, datetime
 from typing import Annotated
-from uuid import UUID, uuid4
 
 from pydantic import (
     AwareDatetime,
@@ -50,13 +49,16 @@ class DeviceUpdate(InputModel):
 
 class DeviceOut(DeviceCreate):
     model_config = ConfigDict(from_attributes=True)
-    mqtt_password: str | None = None
     created_at: datetime
 
     @field_validator("created_at")
     @classmethod
     def utc_creation(cls, value):
         return as_utc(value)
+
+
+class DeviceCreateOut(DeviceOut):
+    mqtt_password: str | None = None
 
 
 class ParameterCreate(InputModel):
