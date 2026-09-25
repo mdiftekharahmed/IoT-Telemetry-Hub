@@ -1,6 +1,8 @@
 # Local development only. Add TLS/proxy and production networking before VPS deployment.
 x-app: &app
   build: .
+  env_file:
+    - .env
   environment: &app-env
     DATABASE_URL: postgresql+psycopg://telemetry:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/telemetry
     MQTT_HOST: mosquitto
