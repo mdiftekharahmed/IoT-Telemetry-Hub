@@ -2,7 +2,7 @@ import math
 import re
 from datetime import UTC, datetime
 from typing import Annotated
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from pydantic import (
     AwareDatetime,
