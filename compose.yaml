@@ -60,6 +60,8 @@ services:
       - "443:8443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./docker/cert.pem:/etc/caddy/cert.pem:ro
+      - ./docker/key.pem:/etc/caddy/key.pem:ro
       - caddy-data:/data
     depends_on:
       api:

@@ -2,7 +2,7 @@
 	auto_https disable_redirects
 }
 
-100.108.219.54:8443 {
-	tls internal
+:8443 {
+	tls /etc/caddy/cert.pem /etc/caddy/key.pem
 	reverse_proxy api:8000
 }
