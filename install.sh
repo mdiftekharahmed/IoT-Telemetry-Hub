@@ -49,7 +49,7 @@ fi
 step "Configuration"
 
 # API port
-read -rp "  API port [8000]: " API_PORT
+read -rp "  API port [8000]: " API_PORT < /dev/tty
 API_PORT="${API_PORT:-8000}"
 
 # Passwords — generate secure defaults, let user override
@@ -58,18 +58,18 @@ DEFAULT_MQTT_PASS="$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9' | head -c 32)"
 
 echo ""
 warn "Leave passwords blank to use auto-generated secure values (recommended)."
-read -rp "  PostgreSQL password [auto]: " PG_PASS
+read -rp "  PostgreSQL password [auto]: " PG_PASS < /dev/tty
 PG_PASS="${PG_PASS:-$DEFAULT_PG_PASS}"
 
-read -rp "  MQTT collector password [auto]: " MQTT_PASS
+read -rp "  MQTT collector password [auto]: " MQTT_PASS < /dev/tty
 MQTT_PASS="${MQTT_PASS:-$DEFAULT_MQTT_PASS}"
 
 # systemTemp health thresholds (optional)
 echo ""
 info "systemTemp health thresholds (leave blank to skip — shows 'Unknown' in UI)."
-read -rp "  SYSTEM_TEMP_MIN [blank]: " SYSTEM_TEMP_MIN
-read -rp "  SYSTEM_TEMP_MAX [blank]: " SYSTEM_TEMP_MAX
-read -rp "  SYSTEM_TEMP_UNIT [blank]: " SYSTEM_TEMP_UNIT
+read -rp "  SYSTEM_TEMP_MIN [blank]: " SYSTEM_TEMP_MIN < /dev/tty
+read -rp "  SYSTEM_TEMP_MAX [blank]: " SYSTEM_TEMP_MAX < /dev/tty
+read -rp "  SYSTEM_TEMP_UNIT [blank]: " SYSTEM_TEMP_UNIT < /dev/tty
 
 echo ""
 echo -e "  ${BOLD}Summary${RESET}"
@@ -78,7 +78,7 @@ echo "  ├ API port      : $API_PORT"
 echo "  ├ PG password   : ${PG_PASS:0:6}…  (${#PG_PASS} chars)"
 echo "  └ MQTT password : ${MQTT_PASS:0:6}…  (${#MQTT_PASS} chars)"
 echo ""
-read -rp "  Proceed? [Y/n]: " CONFIRM
+read -rp "  Proceed? [Y/n]: " CONFIRM < /dev/tty
 CONFIRM="${CONFIRM:-Y}"
 [[ "$CONFIRM" =~ ^[Yy]$ ]] || { info "Aborted."; exit 0; }
 
