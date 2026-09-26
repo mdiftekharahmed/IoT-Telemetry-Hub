@@ -180,9 +180,7 @@ mosquitto_passwd -c -b "$APP_DIR/secrets/mosquitto.passwd" collector "$MQTT_PASS
 chmod 600 "$APP_DIR/secrets/mosquitto.passwd"
 success "secrets/mosquitto.passwd created (collector user)"
 
-info "To add a device credential after registration run:"
-echo "  mosquitto_passwd -b $APP_DIR/secrets/mosquitto.passwd <device_id> <password>"
-echo "  docker compose -f $APP_DIR/compose.yaml restart mosquitto"
+info "Note: The web UI will automatically manage IoT device credentials in this file when you add devices."
 
 # ── 5.5. Generate self-signed certificate for Caddy ───────────
 step "5.5 / 7 — HTTPS Certificate"
@@ -292,7 +290,4 @@ echo -e "  ${BOLD}Admin Password      :${RESET}  ${ADMIN_PASS}"
 echo -e "  ${BOLD}PostgreSQL password :${RESET}  ${PG_PASS}"
 echo -e "  ${BOLD}MQTT password       :${RESET}  ${MQTT_PASS}"
 echo ""
-echo -e "  ${CYAN}To add an IoT device MQTT credential:${RESET}"
-echo -e "  mosquitto_passwd -b $APP_DIR/secrets/mosquitto.passwd <device_id> <password>"
-echo -e "  docker compose -f $APP_DIR/compose.yaml restart mosquitto"
-echo ""
+

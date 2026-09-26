@@ -75,20 +75,9 @@ To get an ESP32 node sending data to your server, you need to register it in bot
 ### Step 2: Register Parameters
 1. Go to the **Parameters** tab in the dashboard.
 2. Click **Add Parameter** to whitelist the data your ESP32 will send (e.g., `temperature` with unit `°C`, `humidity` with unit `%`). 
-*(Note: Any parameter sent by the ESP32 that is not whitelisted here will be safely ignored).*
 
-### Step 3: Add the Device to the MQTT Broker
-Your MQTT Broker (Mosquitto) requires devices to authenticate. You must generate a password for your new device. 
 
-On your server terminal, run the following command to add a new user to the Mosquitto password file (replace `ESP32_NODE_01` with your exact Device ID, and `your_secure_password` with a strong password):
-
-```bash
-cd /opt/iot-telemetry-hub
-sudo docker compose exec mosquitto mosquitto_passwd -b /secrets/mosquitto.passwd ESP32_NODE_01 your_secure_password
-```
-*Note: It may take up to 5 seconds for Mosquitto to reload the new password file.*
-
-### Step 4: ESP32 Code Example (Arduino IDE)
+### Step 3: ESP32 Code Example (Arduino IDE)
 
 Use the following Arduino code template to connect your ESP32 to Wi-Fi and publish JSON telemetry to the server. 
 
@@ -108,7 +97,7 @@ const char* password = "YOUR_WIFI_PASSWORD";
 // 2. MQTT Broker Settings
 const char* mqtt_server = "YOUR_SERVER_IP_OR_DOMAIN";
 const int mqtt_port = 1883;
-// 3. Device Credentials (Must match exactly what you added in Step 1 & 3)
+// 3. Device Credentials (Must match exactly what you added in Step 1)
 const char* mqtt_user = "ESP32_NODE_01"; 
 const char* mqtt_pass = "your_secure_password";
 
