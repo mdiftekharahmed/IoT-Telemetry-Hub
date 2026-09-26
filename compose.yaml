@@ -24,7 +24,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
-    restart: unless-stopped
+    restart: always
 
   mosquitto:
     image: eclipse-mosquitto:2
@@ -45,7 +45,7 @@ services:
           if [ \"\$$L\" != \"\$$N\" ]; then kill -HUP %1; L=\"\$$N\"; fi;
         done
       "
-    restart: unless-stopped
+    restart: always
 
   migrate:
     <<: *app
@@ -66,7 +66,7 @@ services:
     depends_on:
       api:
         condition: service_healthy
-    restart: unless-stopped
+    restart: always
 
   api:
     <<: *app
@@ -83,7 +83,7 @@ services:
       interval: 15s
       timeout: 5s
       retries: 3
-    restart: unless-stopped
+    restart: always
 
   worker:
     <<: *app
@@ -93,7 +93,7 @@ services:
         condition: service_completed_successfully
       mosquitto:
         condition: service_started
-    restart: unless-stopped
+    restart: always
 
 volumes:
   postgres-data:

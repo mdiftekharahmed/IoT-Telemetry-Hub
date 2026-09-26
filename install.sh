@@ -110,9 +110,10 @@ https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" \
   sudo apt-get update -qq
   sudo apt-get install -y -qq \
     docker-ce docker-ce-cli containerd.io docker-compose-plugin
-  sudo systemctl enable --now docker
   success "Docker Engine installed"
 fi
+
+sudo systemctl enable --now docker containerd 2>/dev/null || true
 
 # Add current user to docker group so compose runs without sudo
 if ! groups "$CURRENT_USER" | grep -q docker; then
@@ -232,6 +233,32 @@ done
 echo ""
 success "Stack is healthy (${ELAPSED}s)"
 
+# ── 6.5. Systemd auto-start service ───────────────────────────
+step "6.5 / 7 — Systemd auto-start service"
+
+info "Creating systemd service for auto-start after reboot..."
+cat <<EOF | sudo tee /etc/systemd/system/iot-telemetry-hub.service > /dev/null
+[Unit]
+Description=IoT Telemetry Hub
+Requires=docker.service
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=$APP_DIR
+ExecStart=/usr/bin/sg docker -c "docker compose up -d --remove-orphans"
+ExecStop=/usr/bin/sg docker -c "docker compose down"
+User=$CURRENT_USER
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable iot-telemetry-hub.service
+success "Systemd service (iot-telemetry-hub) created and enabled"
+
 # ── 7. Create first admin user ────────────────────────────────
 step "7 / 7 — Create admin user"
 
@@ -254,7 +281,8 @@ echo -e "  ${BOLD}Health    :${RESET}  https://${LOCAL_IP}/health/ready"
 echo -e "  ${BOLD}Login     :${RESET}  https://${LOCAL_IP}/login"
 echo ""
 echo -e "  ${BOLD}App dir   :${RESET}  $APP_DIR"
-echo -e "  ${BOLD}Logs      :${RESET}  cd $APP_DIR && docker compose logs -f api"
+echo -e "  ${BOLD}Logs      :${RESET}  sudo journalctl -u iot-telemetry-hub -f"
+echo -e "  ${BOLD}Service   :${RESET}  sudo systemctl restart iot-telemetry-hub"
 echo -e "  ${BOLD}Update    :${RESET}  cd $APP_DIR && git pull && bash deploy/start.sh"
 echo ""
 echo -e "  ${YELLOW}${BOLD}Save these credentials securely — they are not stored elsewhere:${RESET}"

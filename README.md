@@ -25,10 +25,39 @@ To install and run the full backend (including the PostgreSQL database, MQTT bro
    - It will prompt you to set up passwords and environment variables.
    - It builds the Docker images and starts all backend services.
 3. **Create your Admin Account**:
-   - Once the script finishes, it will print a final command (e.g., `docker compose -f /opt/iot-telemetry-hub/compose.yaml exec api telemetry-admin <username>`) for you to run. Run this command to set up your initial admin login.
+   - Once the script finishes, it will print a final command (e.g., `docker compose exec api python -m app.cli <username>`) for you to run. Run this command to set up your initial admin login.
 4. **Access the Dashboard**:
-   - Navigate to `http://<your-server-ip>:8000` in your web browser.
+   - Navigate to `https://<your-server-ip>` in your web browser. (Note: Because it uses a self-signed certificate by default, your browser will show a security warning. Click "Advanced" and "Proceed" to bypass it).
    - Log in using the admin account you just created.
+
+### Managing the Background Service
+The installation script creates a systemd service so your hub automatically starts on boot.
+- Check Status: `sudo systemctl status iot-telemetry-hub`
+- Restart Hub: `sudo systemctl restart iot-telemetry-hub`
+- View Logs: `sudo journalctl -u iot-telemetry-hub -f`
+
+---
+
+## Securing with a Free Public SSL Certificate
+
+By default, the hub uses a self-signed certificate for the IP address. For a proper, trusted HTTPS connection without browser warnings, you can get a free Let's Encrypt certificate:
+
+1. Register a free domain at [DuckDNS](https://www.duckdns.org/) or [No-IP] and point it to your server's IP address.
+2. Edit your Caddyfile:
+   ```bash
+   nano /opt/iot-telemetry-hub/Caddyfile
+   ```
+3. Replace the entire contents with:
+   ```text
+   your-project.duckdns.org {
+       reverse_proxy api:8000
+   }
+   ```
+4. Restart the system:
+   ```bash
+   sudo systemctl restart iot-telemetry-hub
+   ```
+Caddy will automatically request and renew a trusted Let's Encrypt certificate for your domain.
 
 ---
 
@@ -60,21 +89,26 @@ sudo docker compose exec mosquitto mosquitto_passwd -b /secrets/mosquitto.passwd
 
 ### Step 4: ESP32 Code Example (Arduino IDE)
 
-Use the following Arduino code template to connect your ESP32 to Wi-Fi and publish JSON telemetry to the server. You will need the `PubSubClient` and `ArduinoJson` libraries installed in your Arduino IDE.
+Use the following Arduino code template to connect your ESP32 to Wi-Fi and publish JSON telemetry to the server. 
+
+**Dependencies**: Open the Library Manager in the Arduino IDE and install:
+1. **PubSubClient** (by Nick O'Leary)
+2. **ArduinoJson** (by Benoit Blanchon)
 
 ```cpp
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 
-// Wi-Fi Credentials
+// 1. Wi-Fi Credentials
 const char* ssid = "YOUR_WIFI_SSID";
 const char* password = "YOUR_WIFI_PASSWORD";
 
-// MQTT Broker Settings
-const char* mqtt_server = "YOUR_SERVER_IP";
+// 2. MQTT Broker Settings
+const char* mqtt_server = "YOUR_SERVER_IP_OR_DOMAIN";
 const int mqtt_port = 1883;
-const char* mqtt_user = "ESP32_NODE_01"; // Must match Device ID exactly
+// 3. Device Credentials (Must match exactly what you added in Step 1 & 3)
+const char* mqtt_user = "ESP32_NODE_01"; 
 const char* mqtt_pass = "your_secure_password";
 
 // The MQTT Topic must match the format: devices/<DEVICE_ID>/telemetry
@@ -95,17 +129,18 @@ void setup_wifi() {
     delay(500);
     Serial.print(".");
   }
-  Serial.println("\nWiFi connected.");
+  Serial.println("\nWiFi connected. IP: ");
+  Serial.println(WiFi.localIP());
 }
 
 void reconnect() {
   while (!client.connected()) {
     Serial.print("Attempting MQTT connection...");
-    // Create a random client ID
+    // Create a random client ID to avoid conflicts
     String clientId = "ESP32Client-";
     clientId += String(random(0xffff), HEX);
     
-    // Attempt to connect
+    // Attempt to connect using the device credentials
     if (client.connect(clientId.c_str(), mqtt_user, mqtt_pass)) {
       Serial.println("connected");
     } else {
@@ -133,13 +168,13 @@ void loop() {
   if (now - lastMsg > 10000) { // Send data every 10 seconds
     lastMsg = now;
 
-    // Generate sensor data
+    // Generate example sensor data
     float temp = 24.0 + random(-10, 10) / 10.0;
     float hum = 50.0 + random(-50, 50) / 10.0;
     float sysTemp = 40.0 + random(-20, 20) / 10.0;
   
     // Create JSON payload
-    StaticJsonDocument<200> doc;
+    StaticJsonDocument<256> doc;
     
     // Unique message ID: MAC address + incrementing counter
     String msgId = WiFi.macAddress() + "-" + String(msgCounter++);
