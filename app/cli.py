@@ -1,4 +1,5 @@
 import argparse
+import os
 from getpass import getpass
 
 from sqlalchemy import delete
@@ -15,11 +16,16 @@ def main():
     parser.add_argument("username")
     parser.add_argument("--reset-password", action="store_true")
     args = parser.parse_args()
-    password = getpass("Admin password (at least 12 characters): ")
+    
+    password = os.environ.get("ADMIN_PASSWORD")
+    if not password:
+        password = getpass("Admin password (at least 12 characters): ")
+        if password != getpass("Confirm password: "):
+            parser.error("Passwords do not match")
+            
     if len(password) < 12 or len(password) > 1024:
         parser.error("Password must contain 12 to 1024 characters")
-    if password != getpass("Confirm password: "):
-        parser.error("Passwords do not match")
+        
     login = Login(username=args.username, password=password)
     engine = build_engine(Settings().database_url)
     try:

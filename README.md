@@ -24,11 +24,12 @@ To install and run the full backend (including the PostgreSQL database, MQTT bro
    - The script will automatically install Docker and its dependencies.
    - It will prompt you to set up passwords and environment variables.
    - It builds the Docker images and starts all backend services.
-3. **Create your Admin Account**:
-   - Once the script finishes, it will print a final command (e.g., `docker compose exec api python -m app.cli <username>`) for you to run. Run this command to set up your initial admin login.
+3. **Admin Account Auto-Generated**:
+   - The installation script will automatically generate a secure admin account for you.
+   - At the very end of the installation, a summary screen will print your `Admin Username` (admin) and your `Admin Password`. **Save these credentials securely!**
 4. **Access the Dashboard**:
    - Navigate to `https://<your-server-ip>` in your web browser. (Note: Because it uses a self-signed certificate by default, your browser will show a security warning. Click "Advanced" and "Proceed" to bypass it).
-   - Log in using the admin account you just created.
+   - Log in using the admin account printed in your terminal.
 
 ### Managing the Background Service
 The installation script creates a systemd service so your hub automatically starts on boot.

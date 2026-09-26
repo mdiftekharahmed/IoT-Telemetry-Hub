@@ -262,10 +262,11 @@ success "Systemd service (iot-telemetry-hub) created and enabled"
 # ── 7. Create first admin user ────────────────────────────────
 step "7 / 7 — Create admin user"
 
-echo ""
-info "You will now set up the first administrator account for the web UI."
-echo ""
-echo "  docker compose exec -it api python -m app.cli <your_username>"
+ADMIN_USER="admin"
+ADMIN_PASS="$(openssl rand -base64 16 | tr -dc 'A-Za-z0-9' | head -c 16)"
+info "Auto-generating default admin user ($ADMIN_USER)..."
+sg docker -c "docker compose exec -e ADMIN_PASSWORD=$ADMIN_PASS -T api python -m app.cli $ADMIN_USER"
+success "Admin user created"
 
 # ── Final summary ─────────────────────────────────────────────
 LOCAL_IP=$(hostname -I | awk '{print $1}')
@@ -286,6 +287,8 @@ echo -e "  ${BOLD}Service   :${RESET}  sudo systemctl restart iot-telemetry-hub"
 echo -e "  ${BOLD}Update    :${RESET}  cd $APP_DIR && git pull && bash deploy/start.sh"
 echo ""
 echo -e "  ${YELLOW}${BOLD}Save these credentials securely — they are not stored elsewhere:${RESET}"
+echo -e "  ${BOLD}Admin Username      :${RESET}  ${ADMIN_USER}"
+echo -e "  ${BOLD}Admin Password      :${RESET}  ${ADMIN_PASS}"
 echo -e "  ${BOLD}PostgreSQL password :${RESET}  ${PG_PASS}"
 echo -e "  ${BOLD}MQTT password       :${RESET}  ${MQTT_PASS}"
 echo ""
