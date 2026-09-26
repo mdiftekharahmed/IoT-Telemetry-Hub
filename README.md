@@ -18,7 +18,7 @@ To install and run the full backend (including the PostgreSQL database, MQTT bro
 
 1. **Run the installation script** (requires sudo privileges):
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/mdiftekharahmed/IoT-Telemetry-Hub/main/install.sh | bash
+   sudo curl -fsSL https://raw.githubusercontent.com/mdiftekharahmed/IoT-Telemetry-Hub/main/install.sh | bash
    ```
 2. **Follow the on-screen prompts**:
    - The script will automatically install Docker and its dependencies.
