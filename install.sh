@@ -257,14 +257,22 @@ sudo systemctl daemon-reload
 sudo systemctl enable iot-telemetry-hub.service
 success "Systemd service (iot-telemetry-hub) created and enabled"
 
-# ── 7. Create first admin user ────────────────────────────────
-step "7 / 7 — Create admin user"
+# ── 7. Create admin users ─────────────────────────────────────
+step "7 / 7 — Create admin users"
 
-ADMIN_USER="admin"
-ADMIN_PASS="$(openssl rand -base64 16 | tr -dc 'A-Za-z0-9' | head -c 16)"
-info "Auto-generating default admin user ($ADMIN_USER)..."
-sg docker -c "docker compose exec -e ADMIN_PASSWORD=$ADMIN_PASS -T api python -m app.cli $ADMIN_USER"
-success "Admin user created"
+info "Auto-generating 5 admin users (mehedi1 to mehedi5)..."
+PASS_1="$(openssl rand -base64 16 | tr -dc 'A-Za-z0-9' | head -c 16)"
+PASS_2="$(openssl rand -base64 16 | tr -dc 'A-Za-z0-9' | head -c 16)"
+PASS_3="$(openssl rand -base64 16 | tr -dc 'A-Za-z0-9' | head -c 16)"
+PASS_4="$(openssl rand -base64 16 | tr -dc 'A-Za-z0-9' | head -c 16)"
+PASS_5="$(openssl rand -base64 16 | tr -dc 'A-Za-z0-9' | head -c 16)"
+
+sg docker -c "docker compose exec -e ADMIN_PASSWORD=$PASS_1 -T api python -m app.cli mehedi1"
+sg docker -c "docker compose exec -e ADMIN_PASSWORD=$PASS_2 -T api python -m app.cli mehedi2"
+sg docker -c "docker compose exec -e ADMIN_PASSWORD=$PASS_3 -T api python -m app.cli mehedi3"
+sg docker -c "docker compose exec -e ADMIN_PASSWORD=$PASS_4 -T api python -m app.cli mehedi4"
+sg docker -c "docker compose exec -e ADMIN_PASSWORD=$PASS_5 -T api python -m app.cli mehedi5"
+success "Admin users created"
 
 # ── Final summary ─────────────────────────────────────────────
 LOCAL_IP=$(hostname -I | awk '{print $1}')
@@ -285,8 +293,11 @@ echo -e "  ${BOLD}Service   :${RESET}  sudo systemctl restart iot-telemetry-hub"
 echo -e "  ${BOLD}Update    :${RESET}  cd $APP_DIR && git pull && bash deploy/start.sh"
 echo ""
 echo -e "  ${YELLOW}${BOLD}Save these credentials securely — they are not stored elsewhere:${RESET}"
-echo -e "  ${BOLD}Admin Username      :${RESET}  ${ADMIN_USER}"
-echo -e "  ${BOLD}Admin Password      :${RESET}  ${ADMIN_PASS}"
+echo -e "  ${BOLD}Admin mehedi1       :${RESET}  ${PASS_1}"
+echo -e "  ${BOLD}Admin mehedi2       :${RESET}  ${PASS_2}"
+echo -e "  ${BOLD}Admin mehedi3       :${RESET}  ${PASS_3}"
+echo -e "  ${BOLD}Admin mehedi4       :${RESET}  ${PASS_4}"
+echo -e "  ${BOLD}Admin mehedi5       :${RESET}  ${PASS_5}"
 echo -e "  ${BOLD}PostgreSQL password :${RESET}  ${PG_PASS}"
 echo -e "  ${BOLD}MQTT password       :${RESET}  ${MQTT_PASS}"
 echo ""
