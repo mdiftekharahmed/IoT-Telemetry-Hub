@@ -267,11 +267,11 @@ PASS_3="$(openssl rand -base64 16 | tr -dc 'A-Za-z0-9' | head -c 16)"
 PASS_4="$(openssl rand -base64 16 | tr -dc 'A-Za-z0-9' | head -c 16)"
 PASS_5="$(openssl rand -base64 16 | tr -dc 'A-Za-z0-9' | head -c 16)"
 
-sg docker -c "docker compose exec -e ADMIN_PASSWORD=$PASS_1 -T api python -m app.cli mehedi1"
-sg docker -c "docker compose exec -e ADMIN_PASSWORD=$PASS_2 -T api python -m app.cli mehedi2"
-sg docker -c "docker compose exec -e ADMIN_PASSWORD=$PASS_3 -T api python -m app.cli mehedi3"
-sg docker -c "docker compose exec -e ADMIN_PASSWORD=$PASS_4 -T api python -m app.cli mehedi4"
-sg docker -c "docker compose exec -e ADMIN_PASSWORD=$PASS_5 -T api python -m app.cli mehedi5"
+sg docker -c "docker compose exec -e ADMIN_PASSWORD=$PASS_1 -T api python -m app.cli mehedi1" < /dev/null
+sg docker -c "docker compose exec -e ADMIN_PASSWORD=$PASS_2 -T api python -m app.cli mehedi2" < /dev/null
+sg docker -c "docker compose exec -e ADMIN_PASSWORD=$PASS_3 -T api python -m app.cli mehedi3" < /dev/null
+sg docker -c "docker compose exec -e ADMIN_PASSWORD=$PASS_4 -T api python -m app.cli mehedi4" < /dev/null
+sg docker -c "docker compose exec -e ADMIN_PASSWORD=$PASS_5 -T api python -m app.cli mehedi5" < /dev/null
 success "Admin users created"
 
 # ── Final summary ─────────────────────────────────────────────
