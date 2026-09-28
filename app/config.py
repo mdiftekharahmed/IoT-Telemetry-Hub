@@ -10,8 +10,8 @@ class Settings(BaseSettings):
     max_devices: int = Field(default=10, ge=1, le=10)
     secure_cookies: bool = False
     demo_mode: bool = False
-    system_temp_min: float | None = Field(default=None, allow_inf_nan=False)
-    system_temp_max: float | None = Field(default=None, allow_inf_nan=False)
+    system_temp_min: float | None = Field(default=10.0, allow_inf_nan=False)
+    system_temp_max: float | None = Field(default=50.0, allow_inf_nan=False)
     system_temp_unit: str = Field(default="", max_length=16)
     mqtt_host: str = "localhost"
     mqtt_port: int = Field(default=1883, ge=1, le=65535)
