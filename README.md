@@ -79,7 +79,7 @@ To get an ESP32 node sending data to your server, you need to register it in bot
 
 ### Step 3: ESP32 Code Example (Arduino IDE)
 
-Use the following Arduino code template to connect your ESP32 to Wi-Fi and publish JSON telemetry to the server. 
+The default MQTT connection port is **1883**. Use the following Arduino code template to connect your ESP32 to Wi-Fi and publish JSON telemetry to the server. 
 
 **Dependencies**: Open the Library Manager in the Arduino IDE and install:
 1. **PubSubClient** (by Nick O'Leary)
