@@ -1,0 +1,22 @@
+16:39:43.591 -> [  3488][W][sd_diskio.cpp:174] sdCommand(): no token received
+16:39:43.702 -> [  3608][W][sd_diskio.cpp:174] sdCommand(): no token received
+16:39:43.823 -> [  3728][W][sd_diskio.cpp:174] sdCommand(): no token received
+16:39:43.923 -> [  3848][E][sd_diskio.cpp:199] sdCommand(): Card Failed! cmd: 0x00
+16:39:43.958 -> [  3854][W][sd_diskio.cpp:516] ff_sd_initialize(): GO_IDLE_STATE failed
+16:39:43.958 -> [  3860][E][sd_diskio.cpp:806] sdcard_mount(): f_mount failed: (3) The physical drive cannot work
+16:39:43.958 -> [  3869][W][sd_diskio.cpp:174] sdCommand(): no token received
+16:39:44.073 -> [  3988][W][sd_diskio.cpp:174] sdCommand(): no token received
+16:39:44.411 -> [  4108][W][sd_diskio.cpp:174] sdCommand(): no token received
+16:39:44.417 -> [  4229][E][sd_diskio.cpp:199] sdCommand(): Card Failed! cmd: 0x00
+16:39:44.417 -> [  4235][W][sd_logger.cpp:63] attemptMount(): SD mount attempt 3/3 failed
+16:39:44.417 -> [NO_RTC] [ERROR] SD card init failed — continuing without storage
+16:39:44.417 -> [  4241][I][esp32-hal-i2c.c:75] i2cInit(): Initialising I2C Master: sda=11 scl=10 freq=100000
+16:39:44.417 -> [  4250][W][Wire.cpp:301] begin(): Bus already started in Master Mode.
+16:39:44.417 -> [  4257][E][rtc_module.cpp:17] init(): DS3231 not found on I2C (SDA=11, SCL=10)
+16:39:44.417 -> [NO_RTC] [ERROR] DS3231 RTC init failed
+16:39:44.417 -> [  4265][I][sim800l.cpp:90] init(): SIM800L UART2 ready — RX:GPIO35 TX:GPIO36 @ 9600 baud
+16:39:44.417 -> [  4273][I][power_rail.cpp:25] on(): Sensor rail ON
+16:39:49.391 -> [  9279][I][esp32-hal-adc.c:249] __analogReadMilliVolts(): ADC1: Characterized using Default Vref: 0
+16:39:49.391 -> 
+16:39:49.473 -> [  9365][I][turbidity_sensor.cpp:113] init(): Turbidity sensor primed — 10-sample MA window
+16:39:52.487 -> [ 12382][I][soil_sensor.cpp:172] init(): RS485 ready — UART1 RX:GPIO1 TX:GPIO2 CTRL:GPIO41 @ 4800 baud

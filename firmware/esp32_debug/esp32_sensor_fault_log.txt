@@ -1,0 +1,22 @@
+16:21:12.666 -> [NO_RTC] [ERROR] SD card init failed — continuing without storage
+16:21:12.667 -> [  5317][I][esp32-hal-i2c.c:75] i2cInit(): Initialising I2C Master: sda=11 scl=10 freq=100000
+16:21:12.667 -> [  5326][W][Wire.cpp:301] begin(): Bus already started in Master Mode.
+16:21:12.667 -> [  5333][E][rtc_module.cpp:17] init(): DS3231 not found on I2C (SDA=11, SCL=10)
+16:21:12.667 -> [NO_RTC] [ERROR] DS3231 RTC init failed
+16:21:12.667 -> [  5341][I][sim800l.cpp:90] init(): SIM800L UART2 ready — RX:GPIO35 TX:GPIO36 @ 9600 baud
+16:21:12.704 -> [  5350][I][power_rail.cpp:25] on(): Sensor rail ON
+16:21:17.672 -> [ 10355][I][esp32-hal-adc.c:249] __analogReadMilliVolts(): ADC1: Characterized using Default Vref: 0
+16:21:17.672 -> 
+16:21:17.784 -> [ 10441][I][turbidity_sensor.cpp:113] init(): Turbidity sensor primed — 10-sample MA window
+16:21:18.801 -> [ 11457][W][turbidity_sensor.cpp:130] read(): Turbidity fault — voltage: 0.07 V, health: 1
+16:21:20.800 -> [ 13466][I][soil_sensor.cpp:172] init(): RS485 ready — UART1 RX:GPIO1 TX:GPIO2 CTRL:GPIO41 @ 4800 baud
+16:21:25.633 -> [ 18315][W][soil_sensor.cpp:204] read(): Soil read failed after 3 retries
+16:21:25.668 -> [ 18322][I][soil_sensor.cpp:219] deinit(): RS485 UART1 released — GPIO1/2/41 set to INPUT
+16:21:25.830 -> [ 18481][W][water_quality.cpp:136] init(): DS18B20 not found — TDS will use fallback temperature
+16:21:25.830 -> [ 18490][I][water_quality.cpp:113] tdsPowerOn(): TDS power ON — GPIO16 HIGH
+16:21:25.979 -> [ 18646][I][water_quality.cpp:163] init(): TDS ADC ready — GPIO4, 12-bit (powered from GPIO16)
+16:21:27.304 -> [ 19956][I][water_quality.cpp:124] tdsPowerOff(): TDS power OFF — GPIO16 LOW
+16:21:35.061 -> [ 27722][W][ultrasonic_sensor.cpp:213] init(): Ultrasonic self-test: 0/3 valid in 10 attempts — degraded
+16:21:36.533 -> [ 29008][W][ultrasonic_sensor.cpp:231] read(): Ultrasonic hardware fault detected
+16:21:36.533 -> [ 29016][I][power_rail.cpp:41] off(): Sensor rail OFF (backfeed prevention applied)
+Compiling sketch...

@@ -1,0 +1,23 @@
+16:13:57.485 -> 
+16:13:57.485 -> rst:0x3 (SW_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)
+16:13:57.485 -> configsip: 0, SPIWP:0xee
+16:13:57.485 -> clk_drv:0x00,q_drv:0x00,d_drv:0x00,cs0_drv:0x00,hd_drv:0x00,wp_drv:0x00
+16:13:57.485 -> mode:DIO, clock div:1
+16:13:57.485 -> load:0x3fff0030,len:4876
+16:13:57.485 -> ho 0 tail 12 room 4
+16:13:57.485 -> load:0x40078000,len:16532
+16:13:57.485 -> load:0x40080400,len:3500
+16:13:57.485 -> entry 0x400805b4
+16:13:57.750 -> E BOD: Brownout detector was triggered
+16:13:57.750 -> 
+16:13:57.750 -> 
+16:13:57.750 -> ets Jul 29 2019 12:21:46
+16:13:57.750 -> 
+16:13:57.750 -> rst:0x3 (SW_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)
+16:13:57.750 -> configsip: 0, SPIWP:0xee
+16:13:57.750 -> clk_drv:0x00,q_drv:0x00,d_drv:0x00,cs0_drv:0x00,hd_drv:0x00,wp_drv:0x00
+16:13:57.784 -> mode:DIO, clock div:1
+16:13:57.784 -> load:0x3fff0030,len:4876
+16:13:57.784 -> ho 0 tail 12 room 4
+16:13:57.784 -> load:0x40078000,len:16532
+16:13:57.784 -> load:0x40080400,len:3500

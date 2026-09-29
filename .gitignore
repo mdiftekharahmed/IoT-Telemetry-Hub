@@ -13,4 +13,5 @@ dist/
 *.db
 *.db-*
 secrets/
+/firmware/esp32_debug/local_config.h
 backups/
