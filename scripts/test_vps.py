@@ -13,6 +13,10 @@ from uuid import uuid4
 
 import paho.mqtt.client as mqtt
 
+# Enter the MQTT password for the device supplied with --device.
+# Leave blank to use the hidden prompt. Do not commit a real password to Git.
+DEVICE_MQTT_PASSWORD = "Gh8BbWRCQxLzyM4S"
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -40,7 +44,7 @@ def main():
     loop_started = False
     try:
         if not args.dry_run:
-            password = getpass.getpass("Device MQTT password (hidden): ")
+            password = DEVICE_MQTT_PASSWORD or getpass.getpass("Device MQTT password (hidden): ")
             if not password:
                 parser.error("Device MQTT password is required")
             ready = threading.Event()
