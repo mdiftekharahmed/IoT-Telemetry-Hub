@@ -90,6 +90,7 @@ def main():
                     "temperature": round(random.uniform(24, 32), 1),
                     "humidity": round(random.uniform(50, 85), 1),
                     "systemTemp": round(random.uniform(35, 45), 1),
+                    "NPK": round(random.uniform(10, 90), 1),
                 },
             })
             print(f"[SEND {index + 1}/{args.count}] {topic}\n{payload}")

@@ -29,20 +29,43 @@ services:
   mosquitto:
     image: eclipse-mosquitto:2
     ports:
-      - "1883:1883"
+      - "8883:8883"
     volumes:
       - ./docker/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       - ./docker/acl:/mosquitto/config/acl:ro
       - ./secrets:/secrets:ro
       - mqtt-data:/mosquitto/data
+      - caddy-data:/caddy-data:ro
     command: >
       /bin/sh -c "
+        mkdir -p /mosquitto/certs /mosquitto/config/conf.d
+        chown mosquitto:mosquitto /mosquitto/certs /mosquitto/config/conf.d
+        L_CERT=0
+        check_certs() {
+          CRT=\$$(find /caddy-data/caddy/certificates -name telemetry.durnibar.tech.crt 2>/dev/null | head -n 1)
+          if [ -n \"\$$CRT\" ]; then
+            N_CERT=\$$(stat -c %Y \"\$$CRT\" 2>/dev/null || echo 0)
+            if [ \"\$$L_CERT\" != \"\$$N_CERT\" ]; then
+              cp \"\$$CRT\" /mosquitto/certs/server.crt
+              cp \$$(dirname \"\$$CRT\")/telemetry.durnibar.tech.key /mosquitto/certs/server.key
+              chown mosquitto:mosquitto /mosquitto/certs/server.crt /mosquitto/certs/server.key
+              echo -e 'listener 8883\ncafile /mosquitto/certs/server.crt\ncertfile /mosquitto/certs/server.crt\nkeyfile /mosquitto/certs/server.key' > /mosquitto/config/conf.d/tls.conf
+              L_CERT=\"\$$N_CERT\"
+              return 0
+            fi
+          fi
+          return 1
+        }
+        check_certs
         mosquitto -c /mosquitto/config/mosquitto.conf &
-        L=\$$(stat -c %Y /secrets/mosquitto.passwd 2>/dev/null || echo 0);
+        L_PW=\$$(stat -c %Y /secrets/mosquitto.passwd 2>/dev/null || echo 0)
         while true; do
-          sleep 5;
-          N=\$$(stat -c %Y /secrets/mosquitto.passwd 2>/dev/null || echo 0);
-          if [ \"\$$L\" != \"\$$N\" ]; then kill -HUP %1; L=\"\$$N\"; fi;
+          sleep 5
+          RELOAD=0
+          N_PW=\$$(stat -c %Y /secrets/mosquitto.passwd 2>/dev/null || echo 0)
+          if [ \"\$$L_PW\" != \"\$$N_PW\" ]; then RELOAD=1; L_PW=\"\$$N_PW\"; fi
+          if check_certs; then RELOAD=1; fi
+          if [ \"\$$RELOAD\" = \"1\" ]; then kill -HUP %1; fi
         done
       "
     restart: always
