@@ -9,8 +9,11 @@ const char* ssid = "YOUR_WIFI_SSID";
 const char* password = "YOUR_WIFI_PASSWORD";
 
 // MQTT Broker settings
-const char* mqtt_server = "YOUR_MQTT_SERVER_HOST"; // e.g., "192.168.1.100" or "mqtt.yourdomain.com"
-const int mqtt_port = 8883;
+const char* mqtt_server = "telemetry.durnibar.tech"; // e.g. "telemetry.durnibar.tech" or "192.168.1.100"
+
+// Set use_tls to false for plain MQTT (port 1883), or true for MQTTS TLS (port 8883)
+const bool use_tls = false;
+const int mqtt_port = use_tls ? 8883 : 1883;
 
 // Device credentials from IoT-Telemetry-Hub
 // The user is the device_id. The password was generated when creating the device.
@@ -21,8 +24,9 @@ const char* device_id = "test_device_01";
 // ==========================================
 
 #include <WiFiClientSecure.h>
-WiFiClientSecure espClient;
-PubSubClient client(espClient);
+WiFiClient plainClient;
+WiFiClientSecure secureClient;
+PubSubClient client;
 
 unsigned long lastMsg = 0;
 int messageCount = 0;
@@ -45,9 +49,15 @@ void setup_wifi() {
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
 
-  // Use insecure mode (doesn't verify Let's Encrypt Root CA) 
-  // If you want full security, you must provide the ISRG Root X1 cert via espClient.setCACert(root_ca);
-  espClient.setInsecure();
+  // Configure MQTT client transport
+  if (use_tls) {
+    secureClient.setInsecure(); // Or use secureClient.setCACert(root_ca);
+    client.setClient(secureClient);
+    Serial.println("Configured for MQTTS (TLS) on port 8883");
+  } else {
+    client.setClient(plainClient);
+    Serial.println("Configured for plain MQTT on port 1883");
+  }
 }
 
 void reconnect() {

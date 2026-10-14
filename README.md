@@ -1,6 +1,6 @@
 # IoT Telemetry Hub
 
-**Client documentation:** [User manual and administrator handover guide](CLIENT_USER_MANUAL.md)
+**Client documentation:** [User manual and administrator handover guide](CLIENT_USER_MANUAL.md) | [ESP32 TLS & SIM800L Firmware Security Guide](docs/tls-firmware-guide.md)
 
 A production-ready backend for IoT devices, featuring an authenticated management API, global parameter whitelist, persistent telemetry storage, and a responsive administrative UI dashboard.
 
