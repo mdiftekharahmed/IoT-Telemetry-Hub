@@ -1,5 +1,26 @@
+# ── Collector (internal MQTT worker) ─────────────────────────────────────────
 user collector
+# Old telemetry topics (generic hub)
 topic read devices/+/telemetry
 
-# Device MQTT username must equal its registered device_id.
+# ColdChain topics — collector subscribes to all inbound, publishes downlinks
+topic read cc/+/telemetry
+topic read cc/+/event
+topic read cc/+/sync
+topic read cc/+/ack
+topic read cc/+/status
+topic write cc/+/cmd
+
+# ── ESP32 nodes (username == device_id, e.g. fridge-A) ───────────────────────
+# Generic hub (legacy)
 pattern write devices/%u/telemetry
+
+# ColdChain inbound (node publishes)
+pattern write cc/%u/telemetry
+pattern write cc/%u/event
+pattern write cc/%u/sync
+pattern write cc/%u/ack
+pattern write cc/%u/status
+
+# ColdChain downlink (node subscribes to commands addressed to it)
+pattern read cc/%u/cmd

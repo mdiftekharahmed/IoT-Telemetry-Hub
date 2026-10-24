@@ -13,17 +13,23 @@ from uuid import uuid4
 
 import paho.mqtt.client as mqtt
 
-# Enter the MQTT password for the device supplied with --device.
-# Leave blank to use the hidden prompt. Do not commit a real password to Git.
-DEVICE_MQTT_PASSWORD = "Gh8BbWRCQxLzyM4S"
+# ==============================================================================
+# DEFAULT CONNECTION PARAMETERS (Edit these in code to avoid typing CLI flags)
+# ==============================================================================
+DEFAULT_HOST = "telemetry.durnibar.tech"
+DEFAULT_PORT = 1883
+DEFAULT_DEVICE_ID = "TEST_02"
+DEFAULT_PASSWORD = "7fq1epkIUQ1vkrs7"  # Paste your device's MQTT password here if desired
+# ==============================================================================
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--host", required=True, help="MQTT hostname/IP, without https://")
-    parser.add_argument("--device", required=True, help="Registered device ID / MQTT username")
-    parser.add_argument("--port", type=int, help="Default: 1883, or 8883 with --tls")
-    parser.add_argument("--tls", action="store_true", help="Enable verified MQTT TLS")
+    parser.add_argument("--host", default=DEFAULT_HOST, help=f"MQTT hostname/IP (default: {DEFAULT_HOST})")
+    parser.add_argument("--device", default=DEFAULT_DEVICE_ID, help=f"Registered device ID (default: {DEFAULT_DEVICE_ID})")
+    parser.add_argument("--password", default=DEFAULT_PASSWORD, help="Device MQTT password (prompts if empty)")
+    parser.add_argument("--port", type=int, default=DEFAULT_PORT, help=f"Default: {DEFAULT_PORT}, or 8883 with --tls")
+    parser.add_argument("--tls", action="store_true", help="Enable verified MQTT TLS (port 8883)")
     parser.add_argument("--ca", help="Custom CA certificate PEM file (requires --tls)")
     parser.add_argument("--count", type=int, default=6, help="Messages to send (default: 6)")
     parser.add_argument("--interval", type=float, default=10, help="Seconds between sends")
@@ -35,7 +41,7 @@ def main():
         parser.error("Use a device account, not the collector account")
     if args.count < 1 or not 0 < args.interval < float("inf"):
         parser.error("Count and interval must be positive and finite")
-    port = args.port if args.port is not None else (8883 if args.tls else 1883)
+    port = 8883 if args.tls and args.port == DEFAULT_PORT else args.port
     if not 1 <= port <= 65535 or (args.ca and not args.tls):
         parser.error("Port must be 1-65535; --ca requires --tls")
 
@@ -44,7 +50,7 @@ def main():
     loop_started = False
     try:
         if not args.dry_run:
-            password = DEVICE_MQTT_PASSWORD or getpass.getpass("Device MQTT password (hidden): ")
+            password = args.password or getpass.getpass("Device MQTT password (hidden): ")
             if not password:
                 parser.error("Device MQTT password is required")
             ready = threading.Event()

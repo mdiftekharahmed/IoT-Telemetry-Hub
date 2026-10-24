@@ -1,3 +1,74 @@
 telemetry.durnibar.tech {
-	reverse_proxy api:8000
+	# ── React SPA (ColdChain dashboard) ────────────────────────────────────
+	# Public QR batch check page
+	handle /check/* {
+		reverse_proxy frontend:3000
+	}
+
+	# Main app routes (React Router handles sub-paths internally)
+	handle /app/* {
+		reverse_proxy frontend:3000
+	}
+
+	# SPA root — redirect bare domain to /app/
+	handle / {
+		redir /app/ temporary
+	}
+
+	# ── Backend API ─────────────────────────────────────────────────────────
+	# WebSocket live feed
+	handle /api/ws/* {
+		reverse_proxy api:8000 {
+			transport http {
+				versions h1
+			}
+		}
+	}
+
+	# REST API
+	handle /api/* {
+		reverse_proxy api:8000
+	}
+
+	# Legacy admin SPA (existing server-rendered UI, kept for raw-data access)
+	handle /static/* {
+		reverse_proxy api:8000
+	}
+	handle /login {
+		reverse_proxy api:8000
+	}
+	handle /devices {
+		reverse_proxy api:8000
+	}
+	handle /parameters {
+		reverse_proxy api:8000
+	}
+	handle /data {
+		reverse_proxy api:8000
+	}
+	handle /export {
+		reverse_proxy api:8000
+	}
+	handle /health/* {
+		reverse_proxy api:8000
+	}
+
+	# Default: send everything else to the SPA
+	handle {
+		reverse_proxy frontend:3000
+	}
+
+	# Security headers (Caddy layer)
+	header {
+		Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy same-origin
+	}
+
+	encode gzip
+	log {
+		output stdout
+		format console
+	}
 }

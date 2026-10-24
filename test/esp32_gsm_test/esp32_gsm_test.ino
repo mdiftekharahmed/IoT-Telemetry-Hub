@@ -1,85 +1,104 @@
 // Select your modem before including TinyGSM
 #define TINY_GSM_MODEM_SIM800
-// Increase serial RX buffer size for TLS handshakes
 #define TINY_GSM_RX_BUFFER 1024
 
 #include <TinyGsmClient.h>
-#include <ESP_SSLClient.h> // Performs TLS encryption on the ESP32 (Install "ESP_SSLClient" by Mobizt in Arduino Library Manager)
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 
-// ==========================================
-// User Configuration
-// ==========================================
-// Cellular Network
-// Set your SIM card APN here (e.g., "gpinternet" for Grameenphone, "blweb" for Banglalink)
-const char* apn = "YOUR_APN"; 
+// ==============================================================================
+// USER CONFIGURATION (Matches scripts/test_vps.py)
+// ==============================================================================
+// 1. Cellular APN (e.g., "gpinternet", "blweb", "internet", etc.)
+const char* apn = "YOUR_APN";
 const char* gprsUser = "";
 const char* gprsPass = "";
 
-// MQTT Broker settings
+// 2. MQTT Broker settings (Port 1883 for plain MQTT, 8883 for TLS)
 const char* mqtt_server = "telemetry.durnibar.tech";
+const int mqtt_port = 1883;
 
-// Set use_tls to false for plain MQTT (port 1883), or true for MQTTS TLS (port 8883)
-const bool use_tls = false;
-const int mqtt_port = use_tls ? 8883 : 1883;
-
-// Device credentials from IoT-Telemetry-Hub
-const char* mqtt_user = "test_device_01"; 
+// 3. Registered Device Credentials (from IoT-Telemetry-Hub)
+const char* device_id = "TEST_02";
+const char* mqtt_user = "TEST_02";
 const char* mqtt_password = "YOUR_MQTT_PASSWORD";
-const char* device_id = "test_device_01";
 
-// SIM800L Serial connection (Using ESP32 Hardware Serial 1)
+// 4. SIM800L Hardware Pins (Using ESP32 HardwareSerial 1)
 #define RX_PIN 16
 #define TX_PIN 17
-// ==========================================
+// ==============================================================================
 
 HardwareSerial SerialAT(1);
 TinyGsm modem(SerialAT);
-
-// 1. Plain TCP client: SIM800L transparent data transport pipe
 TinyGsmClient gsmClient(modem);
-
-// 2. SSL/TLS client: Only used if use_tls is set to true
-ESP_SSLClient secureClient;
-
-// 3. MQTT Client
-PubSubClient client;
+PubSubClient client(gsmClient);
 
 unsigned long lastMsg = 0;
 int messageCount = 0;
 
+// Generates a standard RFC 4122 v4 UUID using ESP32 hardware RNG
+String generateUUID() {
+  char uuidStr[37];
+  uint32_t d1 = esp_random();
+  uint32_t d2 = esp_random();
+  uint32_t d3 = esp_random();
+  uint32_t d4 = esp_random();
+  snprintf(uuidStr, sizeof(uuidStr), "%08x-%04x-4%03x-%04x-%04x%08x",
+           d1, (d2 & 0xFFFF), ((d2 >> 16) & 0x0FFF),
+           ((d3 & 0x3FFF) | 0x8000), ((d3 >> 16) & 0xFFFF), d4);
+  return String(uuidStr);
+}
+
 void setup_modem() {
-  // Start AT communication
   SerialAT.begin(9600, SERIAL_8N1, RX_PIN, TX_PIN);
   delay(3000);
 
-  Serial.println("Initializing modem...");
+  Serial.println("[MODEM] Initializing SIM800L...");
   modem.restart();
 
-  Serial.print("Connecting to APN: ");
-  Serial.println(apn);
-  
-  if (!modem.gprsConnect(apn, gprsUser, gprsPass)) {
-    Serial.println("Failed to connect to GPRS");
+  String modemInfo = modem.getModemInfo();
+  Serial.print("[MODEM] Info: ");
+  Serial.println(modemInfo);
+
+  Serial.print("[MODEM] Waiting for cellular network...");
+  if (!modem.waitForNetwork(60000L)) {
+    Serial.println(" FAIL! Check SIM card & antenna.");
     while (true) { delay(1000); }
   }
-  Serial.println("GPRS connected!");
+  Serial.println(" Connected!");
+
+  int csq = modem.getSignalQuality();
+  Serial.print("[MODEM] Signal Quality (CSQ): ");
+  Serial.print(csq);
+  Serial.println(" / 31");
+
+  Serial.print("[GPRS] Connecting to APN: ");
+  Serial.println(apn);
+  if (!modem.gprsConnect(apn, gprsUser, gprsPass)) {
+    Serial.println("[GPRS] Connection failed!");
+    while (true) { delay(1000); }
+  }
+  Serial.println("[GPRS] Connected! IP: " + modem.getLocalIP());
 }
 
 void reconnect() {
   while (!client.connected()) {
-    Serial.print("Attempting MQTT connection via GSM...");
-    
-    String clientId = "ESP32GSM-";
-    clientId += String(random(0xffff), HEX);
-    
+    Serial.print("[MQTT] Connecting to ");
+    Serial.print(mqtt_server);
+    Serial.print(":");
+    Serial.print(mqtt_port);
+    Serial.print(" as device: ");
+    Serial.print(device_id);
+    Serial.print("... ");
+
+    String clientId = "ESP32-GSM-" + String(random(0xffff), HEX);
+
     if (client.connect(clientId.c_str(), mqtt_user, mqtt_password)) {
-      Serial.println("connected");
+      Serial.println("CONNECTED!");
     } else {
-      Serial.print("failed, rc=");
+      Serial.print("FAILED (rc=");
       Serial.print(client.state());
-      Serial.println(" try again in 5 seconds");
+      Serial.println("). Retrying in 5 seconds...");
       delay(5000);
     }
   }
@@ -88,23 +107,12 @@ void reconnect() {
 void setup() {
   Serial.begin(115200);
   randomSeed(analogRead(0));
-  
+
+  Serial.println("\n==========================================");
+  Serial.println("   ESP32 + SIM800L MQTT Telemetry Node   ");
+  Serial.println("==========================================");
+
   setup_modem();
-
-  if (use_tls) {
-    // Attach GSM stream to ESP32 TLS client
-    secureClient.setClient(&gsmClient);
-    secureClient.setBufferSizes(2048, 512);
-    secureClient.setTimeout(15000);
-    secureClient.setInsecure(); // For production with cert validation: secureClient.setRootCA(root_ca);
-    client.setClient(secureClient);
-    Serial.println("Configured for MQTTS (TLS) on port 8883");
-  } else {
-    // Direct plain TCP via GSM module without TLS overhead
-    client.setClient(gsmClient);
-    Serial.println("Configured for plain MQTT on port 1883");
-  }
-
   client.setServer(mqtt_server, mqtt_port);
   client.setBufferSize(512);
 }
@@ -116,36 +124,41 @@ void loop() {
   client.loop();
 
   unsigned long now = millis();
-  
-  // Send a message every 10 seconds
+
+  // Send telemetry every 10 seconds (matches test_vps.py interval)
   if (now - lastMsg > 10000) {
     lastMsg = now;
     messageCount++;
 
-    // For ArduinoJson v6 use: StaticJsonDocument<256> doc;
+    // Generate simulated sensor values identical to test_vps.py
+    float temperature = 24.0 + (random(0, 80) / 10.0);    // 24.0 - 32.0 C
+    float humidity    = 50.0 + (random(0, 350) / 10.0);   // 50.0 - 85.0 %
+    float systemTemp  = 35.0 + (random(0, 100) / 10.0);   // 35.0 - 45.0 C (health check)
+    float npk         = 10.0 + (random(0, 800) / 10.0);   // 10.0 - 90.0
+
+    // Construct JSON payload adhering to the telemetry contract
     JsonDocument doc;
-    String messageId = "msg-gsm-" + String(millis()) + "-" + String(messageCount);
-    doc["message_id"] = messageId;
-    
+    doc["message_id"] = generateUUID();
+
     JsonObject values = doc["values"].to<JsonObject>();
-    values["temperature"] = 25.0 + random(0, 100) / 10.0;
-    values["humidity"] = 60.0 + random(0, 100) / 10.0;
-    
-    char payload[256];
+    values["temperature"] = temperature;
+    values["humidity"]    = humidity;
+    values["systemTemp"]  = systemTemp;
+    values["NPK"]         = npk;
+
+    char payload[384];
     serializeJson(doc, payload);
 
     String topic = "devices/" + String(device_id) + "/telemetry";
 
-    Serial.print("Publishing message over GSM to topic: ");
-    Serial.println(topic);
-    Serial.print("Payload: ");
+    Serial.println("\n[SEND] Publishing QoS 1 telemetry to: " + topic);
     Serial.println(payload);
 
-    if(client.publish(topic.c_str(), payload)) {
-       Serial.println("Publish successful!");
+    if (client.publish(topic.c_str(), payload)) {
+      Serial.println("[ACK] Publish acknowledged by broker!");
     } else {
-       Serial.println("Publish failed!");
+      Serial.println("[ERROR] Publish failed!");
     }
-    Serial.println("-------------------------");
+    Serial.println("------------------------------------------");
   }
 }

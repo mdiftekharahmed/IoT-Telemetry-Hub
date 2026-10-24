@@ -1,8 +1,11 @@
-"""Publish one QoS 1 sample; set MQTT_USERNAME to the registered device_id."""
-
 import argparse
+import sys
 from datetime import UTC, datetime
+from pathlib import Path
 from uuid import uuid4
+
+# Add repository root to Python path so `app` can be imported from any working directory
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from paho.mqtt.publish import single
 

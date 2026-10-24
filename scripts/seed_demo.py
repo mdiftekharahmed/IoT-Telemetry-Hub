@@ -1,9 +1,12 @@
-"""Create an isolated local UI preview database; never seeds the real application DB."""
-
 import math
 import os
+import sys
 from datetime import timedelta
 from pathlib import Path
+
+# Add project root to sys.path so app can be imported from any working directory
+project_root = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(project_root))
 
 from alembic import command
 from alembic.config import Config
@@ -12,11 +15,11 @@ from app.db import build_engine, session_factory
 from app.models import Admin, Device, Parameter, Telemetry, utcnow
 from app.security import password_hasher
 
-demo_file = Path(__file__).resolve().parents[1] / "demo.db"
+demo_file = project_root / "demo.db"
 if demo_file.exists():
     raise SystemExit("demo.db already exists. No changes made.")
 os.environ["DATABASE_URL"] = f"sqlite:///{demo_file.as_posix()}"
-command.upgrade(Config("alembic.ini"), "head")
+command.upgrade(Config(str(project_root / "alembic.ini")), "head")
 engine = build_engine(os.environ["DATABASE_URL"])
 try:
     with session_factory(engine).begin() as db:

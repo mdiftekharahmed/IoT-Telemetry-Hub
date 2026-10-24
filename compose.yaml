@@ -1,16 +1,32 @@
-# Local development only. Add TLS/proxy and production networking before VPS deployment.
+# ColdChain – Docker Compose stack
+# Services: db, mosquitto, migrate, api, worker, frontend, proxy
+# Add TLS termination via Caddy (automatic HTTPS) before VPS deployment.
+
 x-app: &app
-  build: .
+  build:
+    context: .
+    dockerfile: Dockerfile
   env_file:
     - .env
   environment: &app-env
     DATABASE_URL: postgresql+psycopg://telemetry:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/telemetry
     MQTT_HOST: mosquitto
+    MQTT_PORT: "1883"
     MQTT_USERNAME: collector
     MQTT_PASSWORD: ${MQTT_PASSWORD:?Set MQTT_PASSWORD in .env}
+    # ColdChain additions
+    COLDCHAIN_JWT_SECRET: ${COLDCHAIN_JWT_SECRET:?Set COLDCHAIN_JWT_SECRET in .env}
+    DEVICE_SECRETS_JSON: ${DEVICE_SECRETS_JSON:-{}}
+    TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+    TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+    DEMO_TIME_SCALE: ${DEMO_TIME_SCALE:-1.0}
+    HMAC_TS_WINDOW_S: ${HMAC_TS_WINDOW_S:-60}
+    SECURE_COOKIES: ${SECURE_COOKIES:-true}
+    DEMO_MODE: ${DEMO_MODE:-false}
   init: true
 
 services:
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
   db:
     image: postgres:17-alpine
     environment:
@@ -26,11 +42,12 @@ services:
       retries: 20
     restart: always
 
+  # ── Mosquitto MQTT broker ───────────────────────────────────────────────────
   mosquitto:
     image: eclipse-mosquitto:2
     ports:
-      - "1883:1883"
-      - "8883:8883"
+      - "1883:1883"   # plain MQTT (ESP32 nodes on local network / VPN)
+      - "8883:8883"   # MQTTS (TLS; cert injected at runtime by the watcher loop)
     volumes:
       - ./docker/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       - ./docker/acl:/mosquitto/config/acl:ro
@@ -43,15 +60,15 @@ services:
         chown mosquitto:mosquitto /mosquitto/certs /mosquitto/config/conf.d
         L_CERT=0
         check_certs() {
-          CRT=\$$(find /caddy-data/caddy/certificates -name telemetry.durnibar.tech.crt 2>/dev/null | head -n 1)
-          if [ -n \"\$$CRT\" ]; then
-            N_CERT=\$$(stat -c %Y \"\$$CRT\" 2>/dev/null || echo 0)
-            if [ \"\$$L_CERT\" != \"\$$N_CERT\" ]; then
-              cp \"\$$CRT\" /mosquitto/certs/server.crt
-              cp \$$(dirname \"\$$CRT\")/telemetry.durnibar.tech.key /mosquitto/certs/server.key
+          CRT=$$(find /caddy-data/caddy/certificates -name telemetry.durnibar.tech.crt 2>/dev/null | head -n 1)
+          if [ -n \"$$CRT\" ]; then
+            N_CERT=$$(stat -c %Y \"$$CRT\" 2>/dev/null || echo 0)
+            if [ \"$$L_CERT\" != \"$$N_CERT\" ]; then
+              cp \"$$CRT\" /mosquitto/certs/server.crt
+              cp $$(dirname \"$$CRT\")/telemetry.durnibar.tech.key /mosquitto/certs/server.key
               chown mosquitto:mosquitto /mosquitto/certs/server.crt /mosquitto/certs/server.key
               echo -e 'listener 8883\ncafile /mosquitto/certs/server.crt\ncertfile /mosquitto/certs/server.crt\nkeyfile /mosquitto/certs/server.key' > /mosquitto/config/conf.d/tls.conf
-              L_CERT=\"\$$N_CERT\"
+              L_CERT=\"$$N_CERT\"
               return 0
             fi
           fi
@@ -59,18 +76,19 @@ services:
         }
         check_certs
         mosquitto -c /mosquitto/config/mosquitto.conf &
-        L_PW=\$$(stat -c %Y /secrets/mosquitto.passwd 2>/dev/null || echo 0)
+        L_PW=$$(stat -c %Y /secrets/mosquitto.passwd 2>/dev/null || echo 0)
         while true; do
           sleep 5
           RELOAD=0
-          N_PW=\$$(stat -c %Y /secrets/mosquitto.passwd 2>/dev/null || echo 0)
-          if [ \"\$$L_PW\" != \"\$$N_PW\" ]; then RELOAD=1; L_PW=\"\$$N_PW\"; fi
+          N_PW=$$(stat -c %Y /secrets/mosquitto.passwd 2>/dev/null || echo 0)
+          if [ \"$$L_PW\" != \"$$N_PW\" ]; then RELOAD=1; L_PW=\"$$N_PW\"; fi
           if check_certs; then RELOAD=1; fi
-          if [ \"\$$RELOAD\" = \"1\" ]; then kill -HUP %1; fi
+          if [ \"$$RELOAD\" = \"1\" ]; then kill -HUP %1; fi
         done
       "
     restart: always
 
+  # ── Database migrations ─────────────────────────────────────────────────────
   migrate:
     <<: *app
     command: ["alembic", "upgrade", "head"]
@@ -78,6 +96,62 @@ services:
       db:
         condition: service_healthy
 
+  # ── FastAPI backend (REST + WebSocket) ──────────────────────────────────────
+  api:
+    <<: *app
+    expose:
+      - "8000"
+    volumes:
+      - ./secrets:/secrets
+      - ml-models:/app/models   # trained ML model pickles
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    restart: always
+
+  # ── MQTT ingest worker ──────────────────────────────────────────────────────
+  worker:
+    <<: *app
+    command: ["telemetry-worker"]
+    volumes:
+      - ./secrets:/secrets
+      - ml-models:/app/models
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      mosquitto:
+        condition: service_started
+    restart: always
+
+  # ── ML training job (runs once at startup, exits when done) ────────────────
+  # Re-run manually: docker compose run --rm ml-train
+  ml-train:
+    <<: *app
+    command: ["python", "-m", "app.ml.train"]
+    volumes:
+      - ml-models:/app/models
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: "no"   # one-shot; do not auto-restart
+
+  # ── React SPA (ColdChain dashboard) ────────────────────────────────────────
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    expose:
+      - "3000"
+    restart: always
+    # No env vars needed at runtime — all API calls go through /api/* via Caddy
+
+  # ── Caddy reverse proxy (TLS termination + routing) ────────────────────────
   proxy:
     image: caddy:2-alpine
     ports:
@@ -89,32 +163,7 @@ services:
     depends_on:
       api:
         condition: service_healthy
-    restart: always
-
-  api:
-    <<: *app
-    # Internal port only, exposed via Caddy
-    expose:
-      - "8000"
-    volumes:
-      - ./secrets:/secrets
-    depends_on:
-      migrate:
-        condition: service_completed_successfully
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready')"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-    restart: always
-
-  worker:
-    <<: *app
-    command: ["telemetry-worker"]
-    depends_on:
-      migrate:
-        condition: service_completed_successfully
-      mosquitto:
+      frontend:
         condition: service_started
     restart: always
 
@@ -122,3 +171,4 @@ volumes:
   postgres-data:
   mqtt-data:
   caddy-data:
+  ml-models:       # persists trained forecast + health model pickles
