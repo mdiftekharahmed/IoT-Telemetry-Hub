@@ -88,30 +88,39 @@ export function DashboardPage() {
       </div>
 
       {/* Fridge grid */}
-      {isLoading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {[1, 2, 3].map(i => (
-            <div key={i} className="card h-64">
-              <div className="skeleton h-4 w-32 mb-3" />
-              <div className="skeleton h-24 mb-3" />
-              <div className="skeleton h-2 mb-1.5" />
-              <div className="skeleton h-2 w-3/4" />
-            </div>
-          ))}
-        </div>
-      ) : summaries.length === 0 ? (
-        <div className="card text-center py-16">
-          <Refrigerator size={40} className="text-slate-600 mx-auto mb-3" />
-          <p className="text-slate-400">No fridges registered yet.</p>
-          <p className="text-slate-500 text-sm mt-1">Go to Admin to add a fridge and assign a device.</p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {summaries.map(s => (
-            <FridgeCard key={s.fridge.id} summary={s} />
-          ))}
-        </div>
-      )}
+      {(() => {
+        const gridColsClass =
+          summaries.length === 1 ? 'grid-cols-1' :
+          summaries.length === 2 ? 'grid-cols-1 md:grid-cols-2' :
+          summaries.length === 3 ? 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3' :
+          summaries.length === 4 ? 'grid-cols-1 md:grid-cols-2 lg:grid-cols-4' :
+          'grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4'
+
+        return isLoading ? (
+          <div className={`grid gap-4 w-full ${gridColsClass}`}>
+            {[1, 2].map(i => (
+              <div key={i} className="card h-64 w-full">
+                <div className="skeleton h-4 w-32 mb-3" />
+                <div className="skeleton h-24 mb-3" />
+                <div className="skeleton h-2 mb-1.5" />
+                <div className="skeleton h-2 w-3/4" />
+              </div>
+            ))}
+          </div>
+        ) : summaries.length === 0 ? (
+          <div className="card text-center py-16">
+            <Refrigerator size={40} className="text-slate-600 mx-auto mb-3" />
+            <p className="text-slate-400">No fridges registered yet.</p>
+            <p className="text-slate-500 text-sm mt-1">Go to Admin to add a fridge and assign a device.</p>
+          </div>
+        ) : (
+          <div className={`grid gap-4 w-full ${gridColsClass}`}>
+            {summaries.map(s => (
+              <FridgeCard key={s.fridge.id} summary={s} />
+            ))}
+          </div>
+        )
+      })()}
 
       {/* Global stats footer */}
       {report && (

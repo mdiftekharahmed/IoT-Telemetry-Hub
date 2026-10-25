@@ -34,7 +34,7 @@ export function FridgeCard({ summary }: Props) {
 
   return (
     <div
-      className={`card border ${bgClass} cursor-pointer hover:scale-[1.01] transition-all duration-200 animate-in`}
+      className={`card border ${bgClass} cursor-pointer hover:scale-[1.005] transition-all duration-200 animate-in w-full h-full flex flex-col justify-between`}
       onClick={() => nav(`/app/fridges/${fridge.id}`)}
     >
       {/* Header */}
