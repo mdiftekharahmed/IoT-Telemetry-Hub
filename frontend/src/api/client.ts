@@ -36,7 +36,15 @@ api.interceptors.response.use(
   res => res,
   async err => {
     const original = err.config
-    if (err.response?.status !== 401 || original._retry) throw err
+    if (!original || err.response?.status !== 401 || original._retry) {
+      return Promise.reject(err)
+    }
+
+    // Do not attempt to refresh for auth-specific requests (login, refresh, me)
+    if (original.url && /[\/=]auth(\/|$)/.test(original.url)) {
+      return Promise.reject(err)
+    }
+
     original._retry = true
 
     if (!refreshing) {
@@ -48,17 +56,29 @@ api.interceptors.response.use(
             refresh_token: refresh,
           })
           setTokens(data.access_token, data.refresh_token)
-        } catch {
+        } catch (refreshErr) {
           clearTokens()
-          window.location.href = '/app/login'
+          // Only redirect if not already on the login or check page
+          if (
+            typeof window !== 'undefined' &&
+            !window.location.pathname.startsWith('/app/login') &&
+            !window.location.pathname.startsWith('/check/')
+          ) {
+            window.location.href = '/app/login'
+          }
+          throw refreshErr
         } finally {
           refreshing = null
         }
       })()
     }
 
-    await refreshing
-    original.headers.Authorization = `Bearer ${getAccessToken()}`
-    return api(original)
+    try {
+      await refreshing
+      original.headers.Authorization = `Bearer ${getAccessToken()}`
+      return api(original)
+    } catch {
+      return Promise.reject(err)
+    }
   },
 )

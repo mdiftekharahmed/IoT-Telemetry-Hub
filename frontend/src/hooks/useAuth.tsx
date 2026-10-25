@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react'
 import { ccMe, ccLogin as apiLogin } from '../api/endpoints'
-import { setTokens, clearTokens } from '../api/client'
+import { getAccessToken, setTokens, clearTokens } from '../api/client'
 import type { Role } from '../types'
 
 interface AuthUser { id: number; username: string; role: Role; demo_time_scale: number }
@@ -21,9 +21,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    const token = getAccessToken()
+    if (!token) {
+      setLoading(false)
+      return
+    }
     ccMe()
       .then(setUser)
-      .catch(() => setUser(null))
+      .catch(() => {
+        clearTokens()
+        setUser(null)
+      })
       .finally(() => setLoading(false))
   }, [])
 
