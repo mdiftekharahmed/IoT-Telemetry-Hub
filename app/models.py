@@ -36,7 +36,7 @@ class Device(Base):
     fridge_id:    Mapped[int | None]    = mapped_column(
         ForeignKey("fridges.id", ondelete="SET NULL"), nullable=True, index=True
     )
-    fridge: Mapped[Fridge | None] = relationship("Fridge", back_populates="device", foreign_keys=[fridge_id])
+    fridge: Mapped[Fridge | None] = relationship("Fridge", foreign_keys=[fridge_id])
 
 
 class Parameter(Base):
@@ -130,7 +130,7 @@ class Fridge(Base):
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
-    device: Mapped[Device | None]  = relationship("Device", back_populates="fridge", foreign_keys=[device_id])
+    device: Mapped[Device | None]  = relationship("Device", foreign_keys=[device_id])
     batches: Mapped[list[Batch]]   = relationship("Batch", back_populates="fridge")
 
 
