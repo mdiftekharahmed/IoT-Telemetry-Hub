@@ -11,13 +11,13 @@ http://, :80, :443, telemetry.durnibar.tech {
 	}
 
 	# Main app routes (React Router handles sub-paths internally)
-	handle /app/* {
+	handle /app* {
 		reverse_proxy frontend:3000
 	}
 
-	# SPA root — redirect bare domain to /app/
+	# SPA root — serve default dashboard directly on /
 	handle / {
-		redir /app/ temporary
+		reverse_proxy frontend:3000
 	}
 
 	# ── Backend API ─────────────────────────────────────────────────────────
