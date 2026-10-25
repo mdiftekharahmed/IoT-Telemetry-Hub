@@ -18,11 +18,7 @@ telemetry.durnibar.tech {
 	# ── Backend API ─────────────────────────────────────────────────────────
 	# WebSocket live feed
 	handle /api/ws/* {
-		reverse_proxy api:8000 {
-			transport http {
-				versions h1
-			}
-		}
+		reverse_proxy api:8000
 	}
 
 	# REST API
