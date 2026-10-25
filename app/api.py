@@ -247,7 +247,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             db.execute(select(Admin.username).limit(1))
         except SQLAlchemyError as exc:
-            raise HTTPException(503, "Database unavailable or migrations pending") from exc
+            import traceback; traceback.print_exc()
+            raise HTTPException(503, f"Database unavailable or migrations pending: {exc}") from exc
         return {"status": "ok"}
 
     # =========================================================================
