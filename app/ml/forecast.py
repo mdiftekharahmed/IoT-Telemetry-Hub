@@ -140,11 +140,66 @@ def predict_next_30(readings: list[dict]) -> dict:
     # Use last row as current feature vector
     row = df[cols].iloc[-1:].values
     predicted_temp = float(model.predict(row)[0])
+    cur_temp = float(df["temp_c"].iloc[-1])
     breach = predicted_temp > 8.0 or predicted_temp < 2.0
+
+    breach_in_minutes = None
+    if breach:
+        if predicted_temp > 8.0 and cur_temp < 8.0:
+            breach_in_minutes = max(1, min(30, int(round(30.0 * (8.0 - cur_temp) / (predicted_temp - cur_temp)))))
+        elif predicted_temp < 2.0 and cur_temp > 2.0:
+            breach_in_minutes = max(1, min(30, int(round(30.0 * (cur_temp - 2.0) / (cur_temp - predicted_temp)))))
+        elif cur_temp > 8.0 or cur_temp < 2.0:
+            breach_in_minutes = 0
+
+    # Build 11-point trajectory series (5 historical points, Now, 5 future points)
+    n = len(df)
+    hist_steps = [max(0, n - 1 - int(i * (n / 10))) for i in range(5, 0, -1)]
+    points = []
+    
+    # Historical points
+    for idx, step_min in zip(hist_steps, [25, 20, 15, 10, 5]):
+        val = round(float(df["temp_c"].iloc[idx]), 2)
+        points.append({
+            "label": f"-{step_min}m",
+            "temp": val,
+            "type": "history",
+            "predicted_temp": val,
+            "breach_prob": 0.0 if 2.0 <= val <= 8.0 else 1.0,
+        })
+    
+    # Current point
+    points.append({
+        "label": "Now",
+        "temp": round(cur_temp, 2),
+        "type": "current",
+        "predicted_temp": round(cur_temp, 2),
+        "breach_prob": 0.0 if 2.0 <= cur_temp <= 8.0 else 1.0,
+    })
+    
+    # Future projected points (+5m, +10m, +15m, +20m, +25m, +30m)
+    for m in [5, 10, 15, 20, 25, 30]:
+        ratio = m / 30.0
+        interp = cur_temp + (predicted_temp - cur_temp) * ratio
+        prob = 0.0
+        if interp > 8.0:
+            prob = min(1.0, (interp - 8.0) / 2.0)
+        elif interp < 2.0:
+            prob = min(1.0, (2.0 - interp) / 2.0)
+        points.append({
+            "label": f"+{m}m",
+            "temp": round(interp, 2),
+            "type": "forecast",
+            "predicted_temp": round(interp, 2),
+            "breach_prob": round(prob, 2),
+        })
 
     return {
         "available": True,
         "predicted_temp_30m": round(predicted_temp, 2),
         "breach_predicted": breach,
-        "current_temp": round(float(df["temp_c"].iloc[-1]), 2),
+        "breach_in_minutes": breach_in_minutes,
+        "current_temp": round(cur_temp, 2),
+        "forecast": points,
+        "series": points,
     }

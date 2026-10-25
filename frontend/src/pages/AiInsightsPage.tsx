@@ -76,13 +76,33 @@ export function AiInsightsPage() {
     onError: () => toast.error('Confirmation failed'),
   })
 
-  const chartData = forecast?.available
-    ? (forecast.forecast ?? []).map((p: { ts: string; predicted_temp: number; breach_prob?: number }) => ({
-        label: fmtDate(p.ts),
-        temp: p.predicted_temp,
+  const chartData = (() => {
+    if (!forecast?.available) return []
+    const pts = (forecast as { forecast?: unknown[]; series?: unknown[] }).forecast ??
+                (forecast as { forecast?: unknown[]; series?: unknown[] }).series
+    if (Array.isArray(pts) && pts.length > 0) {
+      return pts.map((p: any) => ({
+        label: p.label ?? (p.ts ? fmtDate(p.ts) : ''),
+        temp: p.temp ?? p.predicted_temp,
+        type: p.type ?? 'forecast',
         breach_pct: (p.breach_prob ?? 0) * 100,
       }))
-    : []
+    }
+    const cur = forecast.current_temp ?? 4.0
+    const pred = forecast.predicted_temp_30m ?? cur
+    const step = (pred - cur) / 6
+    return [
+      { label: '-10m', temp: Number((cur - step * 2).toFixed(2)), type: 'history', breach_pct: 0 },
+      { label: '-5m', temp: Number((cur - step).toFixed(2)), type: 'history', breach_pct: 0 },
+      { label: 'Now', temp: Number(cur.toFixed(2)), type: 'current', breach_pct: 0 },
+      { label: '+5m', temp: Number((cur + step).toFixed(2)), type: 'forecast', breach_pct: 0 },
+      { label: '+10m', temp: Number((cur + step * 2).toFixed(2)), type: 'forecast', breach_pct: 0 },
+      { label: '+15m', temp: Number((cur + step * 3).toFixed(2)), type: 'forecast', breach_pct: 0 },
+      { label: '+20m', temp: Number((cur + step * 4).toFixed(2)), type: 'forecast', breach_pct: 0 },
+      { label: '+25m', temp: Number((cur + step * 5).toFixed(2)), type: 'forecast', breach_pct: 0 },
+      { label: '+30m', temp: Number(pred.toFixed(2)), type: 'forecast', breach_pct: (pred > 8 || pred < 2) ? 100 : 0 },
+    ]
+  })()
 
   return (
     <div className="p-4 lg:p-6 space-y-5 animate-in">
@@ -112,13 +132,49 @@ export function AiInsightsPage() {
         ))}
       </div>
 
+      {/* Forecast KPI cards */}
+      {forecast?.available && (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="card-sm">
+            <p className="text-xs text-slate-400">Current Temperature</p>
+            <p className="text-xl font-bold text-white mt-1">
+              {fmtTemp(forecast.current_temp)}
+            </p>
+            <span className="text-[10px] text-slate-500">Live chamber sensor</span>
+          </div>
+          <div className="card-sm">
+            <p className="text-xs text-slate-400">30-Min AI Forecast</p>
+            <p className="text-xl font-bold text-brand-300 mt-1">
+              {fmtTemp(forecast.predicted_temp_30m)}
+            </p>
+            <span className={`text-[10px] font-medium ${forecast.predicted_temp_30m > forecast.current_temp ? 'text-amber-400' : 'text-cyan-400'}`}>
+              {forecast.predicted_temp_30m > forecast.current_temp ? '▲ Warming trend' : '▼ Cooling trend'}
+            </span>
+          </div>
+          <div className="card-sm">
+            <p className="text-xs text-slate-400">30-Min Safety Status</p>
+            <p className={`text-sm font-bold mt-1.5 ${forecast.breach_predicted ? 'text-red-400' : 'text-emerald-400'}`}>
+              {forecast.breach_predicted ? 'Breach Risk Projected' : 'Safe (2°C – 8°C)'}
+            </p>
+            <span className="text-[10px] text-slate-500">
+              {forecast.breach_in_minutes != null ? `Breach in ~${forecast.breach_in_minutes}m` : 'Normal operational range'}
+            </span>
+          </div>
+          <div className="card-sm">
+            <p className="text-xs text-slate-400">Model Engine</p>
+            <p className="text-sm font-bold text-slate-200 mt-1.5">LightGBM Regressor</p>
+            <span className="text-[10px] text-slate-500">12 thermodynamic features</span>
+          </div>
+        </div>
+      )}
+
       <div className="grid lg:grid-cols-2 gap-5">
         {/* Forecast chart */}
         <div className="card lg:col-span-2">
           <div className="flex items-center justify-between mb-3">
             <p className="text-sm font-semibold text-white flex items-center gap-2">
               <TrendingUp size={15} className="text-brand-400" />
-              30-Minute Temperature Forecast
+              30-Minute Temperature Forecast Trajectory
             </p>
             {forecast?.breach_in_minutes != null && (
               <span className="badge-breach animate-pulse text-xs">
@@ -135,28 +191,28 @@ export function AiInsightsPage() {
               <p className="text-sm">{forecast?.reason ?? 'Insufficient data for forecast'}</p>
             </div>
           ) : (
-            <ResponsiveContainer width="100%" height={220}>
-              <AreaChart data={chartData} margin={{ top: 5, right: 5, bottom: 5, left: -10 }}>
+            <ResponsiveContainer width="100%" height={240}>
+              <AreaChart data={chartData} margin={{ top: 10, right: 10, bottom: 5, left: -10 }}>
                 <defs>
                   <linearGradient id="fgGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%"  stopColor="#f59e0b" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#f59e0b" stopOpacity={0}   />
+                    <stop offset="5%"  stopColor="#38bdf8" stopOpacity={0.35} />
+                    <stop offset="95%" stopColor="#38bdf8" stopOpacity={0.0}   />
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(71,85,105,0.25)" />
-                <XAxis dataKey="label" tick={{ fill: '#64748b', fontSize: 10 }} tickLine={false} minTickGap={40} />
-                <YAxis yAxisId="temp" tick={{ fill: '#64748b', fontSize: 10 }} tickLine={false} tickFormatter={v => `${v}°`} />
+                <XAxis dataKey="label" tick={{ fill: '#94a3b8', fontSize: 11 }} tickLine={false} />
+                <YAxis yAxisId="temp" domain={[0, 12]} tick={{ fill: '#94a3b8', fontSize: 11 }} tickLine={false} tickFormatter={v => `${v}°C`} />
                 <YAxis yAxisId="prob" orientation="right" tick={{ fill: '#64748b', fontSize: 10 }} tickLine={false} tickFormatter={v => `${v}%`} domain={[0, 100]} />
                 <Tooltip
                   contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 8 }}
-                  labelStyle={{ color: '#94a3b8', fontSize: 11 }}
+                  labelStyle={{ color: '#f8fafc', fontSize: 12, fontWeight: 'bold' }}
                   formatter={(val: number, name: string) =>
-                    name === 'temp' ? [fmtTemp(val), 'Forecast °C'] : [`${val.toFixed(1)}%`, 'Breach Prob']
+                    name === 'temp' ? [fmtTemp(val), 'Trajectory °C'] : [`${val.toFixed(1)}%`, 'Breach Risk']
                   }
                 />
-                <ReferenceLine yAxisId="temp" y={8}  stroke="#f59e0b" strokeDasharray="4 2" />
-                <ReferenceLine yAxisId="temp" y={12} stroke="#ef4444" strokeDasharray="4 2" />
-                <Area yAxisId="temp" type="monotone" dataKey="temp" stroke="#f59e0b" fill="url(#fgGrad)" strokeWidth={2} dot={false} />
+                <ReferenceLine yAxisId="temp" y={2} stroke="#38bdf8" strokeDasharray="4 2" label={{ value: 'Lower Safe (2°C)', fill: '#38bdf8', fontSize: 10 }} />
+                <ReferenceLine yAxisId="temp" y={8} stroke="#f59e0b" strokeDasharray="4 2" label={{ value: 'Upper Safe (8°C)', fill: '#f59e0b', fontSize: 10 }} />
+                <Area yAxisId="temp" type="monotone" dataKey="temp" stroke="#38bdf8" fill="url(#fgGrad)" strokeWidth={2.5} dot={{ r: 3, fill: '#38bdf8' }} />
                 <Area yAxisId="prob" type="monotone" dataKey="breach_pct" stroke="#ef444460" fill="none" strokeWidth={1} strokeDasharray="4 2" dot={false} />
               </AreaChart>
             </ResponsiveContainer>
