@@ -49,7 +49,7 @@ gen_pw() { openssl rand -base64 32 2>/dev/null | tr -dc 'A-Za-z0-9' | head -c "$
 # Ask a question, honouring an env override (VAR=val bash install.sh).
 # Falls back to an empty answer when stdin has no TTY so that
 # automation keeps running and defaults kick in.
-if [ -w /dev/tty ]; then TTY_OK=true; else TTY_OK=false; fi
+if [ -w /dev/tty ] && [ "${ASSUME_YES:-}" != "1" ]; then TTY_OK=true; else TTY_OK=false; fi
 
 ask() {
   local _var="$1" _prompt="$2" _val=""
