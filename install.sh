@@ -219,6 +219,10 @@ dc() {
 # ── 3. Clone repository ───────────────────────────────────────
 step "3 / 11 — Repository"
 
+# Allow sudo git to operate on a repo owned by a different UID
+# (happens when first clone was done as root and re-run as non-root or vice versa).
+sudo git config --global --add safe.directory "$APP_DIR" 2>/dev/null || true
+
 if [ -d "$APP_DIR/.git" ]; then
   info "Repo already exists — updating to latest..."
   sudo git -C "$APP_DIR" fetch --all --prune
