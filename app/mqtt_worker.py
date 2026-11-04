@@ -109,6 +109,8 @@ class Collector:
             result = self._ingest_cc(self.factory, topic, payload, secrets, window)
             logger.info("cc/telemetry %s accepted=%d dups=%d",
                         result.status, result.accepted, result.duplicates)
+            if result.status == "accepted" and result.accepted > 0:
+                self._fire_telemetry_alerts(topic, payload)
 
         elif "/sync" in topic:
             result = self._ingest_sync(self.factory, topic, payload, secrets, window)
@@ -127,12 +129,29 @@ class Collector:
     def _handle_event(self, topic: str, payload: bytes):
         try:
             evt = json.loads(payload)
-            logger.info("cc/event %s type=%s", topic, evt.get("type"))
+            device_id = topic.split("/")[1] if len(topic.split("/")) >= 3 else "unknown"
+            evt_type = evt.get("type", "")
+            logger.info("cc/event %s type=%s", topic, evt_type)
+
+            bot_token = getattr(self.settings, "telegram_bot_token", "")
+            chat_id   = getattr(self.settings, "telegram_chat_id", "")
+
+            with self.factory() as db:
+                from app import alerts as alert_mod
+                if evt_type == "mains_restored":
+                    alert_mod.fire(db, "mains_restored",
+                                   f"✅ Mains power restored on {device_id}",
+                                   device_id=device_id, bot_token=bot_token, chat_id=chat_id)
+                elif evt_type == "device_online":
+                    alert_mod.fire(db, "device_online",
+                                   f"🟢 Device {device_id} came online",
+                                   device_id=device_id, bot_token=bot_token, chat_id=chat_id)
+                db.commit()
         except Exception:
             logger.warning("Unparseable cc/event on %s", topic)
 
     def _handle_status(self, topic: str, payload: bytes):
-        """LWT or heartbeat: update device last_seen."""
+        """LWT or heartbeat: update device last_seen and fire offline alert on LWT."""
         try:
             parts = topic.split("/")
             device_id = parts[1] if len(parts) >= 3 else None
@@ -140,15 +159,96 @@ class Collector:
             online = status.get("status") == "online"
             if device_id:
                 with self.factory() as db:
-                    from app.models import Device
+                    from app.models import Device, utcnow
                     dev = db.get(Device, device_id)
                     if dev:
                         if online:
-                            from app.models import utcnow
                             dev.last_seen = utcnow()
                         db.commit()
+                if not online:
+                    self._handle_lwt_offline(device_id)
         except Exception:
             logger.warning("cc/status handling error", exc_info=True)
+
+    def _fire_telemetry_alerts(self, topic: str, payload: bytes) -> None:
+        """Fire alert hooks after a successfully accepted telemetry reading."""
+        try:
+            import json as _json
+            from app import alerts as alert_mod
+            msg = _json.loads(payload)
+            d = msg.get("d", {})
+            device_id = topic.split("/")[1]
+            temp_c = float(d.get("temp_c", 5.0))
+            door_open = bool(d.get("door_open", False))
+            door_open_s = int(d.get("door_open_s", 0))
+            mains_present = bool(d.get("mains_present", True))
+
+            bot_token = getattr(self.settings, "telegram_bot_token", "")
+            chat_id   = getattr(self.settings, "telegram_chat_id", "")
+
+            from app.thresholds import get_thresholds
+            th = get_thresholds()
+            safe_min = th.get("temp_safe_min", 2.0)
+            safe_max = th.get("temp_safe_max", 8.0)
+            door_alarm_s = th.get("door_alarm_s", 60)
+
+            with self.factory() as db:
+                # Temperature breach
+                if temp_c < safe_min or temp_c > safe_max:
+                    alert_mod.fire(db, "breach",
+                                   f"🌡️ Temperature breach on {device_id}: {temp_c:.1f}°C (Safe range: {safe_min}–{safe_max}°C)",
+                                   device_id=device_id, bot_token=bot_token, chat_id=chat_id)
+                # Door open alarm
+                if door_open and door_open_s >= door_alarm_s:
+                    alert_mod.fire(db, "door_open_60s",
+                                   f"🚪 Door open >{door_alarm_s}s on {device_id} ({door_open_s}s)",
+                                   device_id=device_id, bot_token=bot_token, chat_id=chat_id)
+                # Door closed after open alarm
+                if not door_open and door_open_s == 0:
+                    alert_mod.fire(db, "door_closed",
+                                   f"✅ Door closed on {device_id}",
+                                   device_id=device_id, bot_token=bot_token, chat_id=chat_id)
+                # Power fail
+                if not mains_present:
+                    alert_mod.fire(db, "power_fail",
+                                   f"⚡ Mains power lost on {device_id}",
+                                   device_id=device_id, bot_token=bot_token, chat_id=chat_id)
+                # Check batch budget status for at_risk / discard alerts
+                from app.models import Device, Batch
+                from sqlalchemy import select
+                dev = db.get(Device, device_id)
+                if dev and dev.fridge_id:
+                    batches = db.scalars(
+                        select(Batch).where(Batch.fridge_id == dev.fridge_id)
+                    ).all()
+                    for batch in batches:
+                        if batch.status == "AT_RISK":
+                            alert_mod.fire(db, "at_risk",
+                                           f"⚠️ Batch {batch.code} at risk ({batch.remaining_pct:.0f}% budget remaining)",
+                                           device_id=device_id, batch_id=batch.id,
+                                           bot_token=bot_token, chat_id=chat_id)
+                        elif batch.status == "DISCARD":
+                            alert_mod.fire(db, "discard",
+                                           f"🚫 Batch {batch.code} DISCARD – heat budget exhausted",
+                                           device_id=device_id, batch_id=batch.id,
+                                           bot_token=bot_token, chat_id=chat_id)
+                db.commit()
+        except Exception as _exc:
+            logger.warning("Alert hook error: %s", _exc)
+
+    def _handle_lwt_offline(self, device_id: str) -> None:
+        """Fire device_offline alert on LWT or heartbeat expiry."""
+        bot_token = getattr(self.settings, "telegram_bot_token", "")
+        chat_id   = getattr(self.settings, "telegram_chat_id", "")
+        try:
+            with self.factory() as db:
+                from app import alerts as alert_mod
+                alert_mod.fire(db, "device_offline",
+                               f"🔴 Device {device_id} went offline",
+                               device_id=device_id, bot_token=bot_token, chat_id=chat_id)
+                db.commit()
+        except Exception as _exc:
+            logger.warning("Offline alert failed for %s: %s", device_id, _exc)
 
     # ── Publish (downlink commands) ─────────────────────────────────────────────
 

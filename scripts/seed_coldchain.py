@@ -148,7 +148,7 @@ def seed(db: Session):
     print("  Audit genesis entry written")
 
     db.commit()
-    print("✓ Seed complete.")
+    print("[OK] Seed complete.")
 
 
 if __name__ == "__main__":

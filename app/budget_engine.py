@@ -22,27 +22,32 @@ from sqlalchemy.orm import Session
 
 import app.audit as audit
 from app.models import Batch, Fridge, Reading, utcnow
+from app.thresholds import get_thresholds
 
 logger = logging.getLogger(__name__)
 
-BUDGET_MINUTES   = 60.0
-AT_RISK_THRESH   = 20.0   # % remaining
 DT_CAP_MINUTES   = 2.0    # cap dt to avoid inflating exposure after a sync gap
-BREACH_LOW       = 2.0
-BREACH_HIGH      = 8.0
-WEIGHT_HIGH      = 12.0
 
 
-def exposure_weight(temp_c: float) -> float:
-    if temp_c <= 8.0:
+def exposure_weight(
+    temp_c: float,
+    threshold_temp: float | None = None,
+    double_temp: float | None = None,
+) -> float:
+    th = get_thresholds()
+    t_thresh = threshold_temp if threshold_temp is not None else th["budget_threshold_temp"]
+    t_double = double_temp if double_temp is not None else th["budget_double_temp"]
+    if temp_c <= t_thresh:
         return 0.0
-    if temp_c <= 12.0:
+    if temp_c <= t_double:
         return 1.0
     return 2.0
 
 
-def _remaining_pct(exposure: float) -> float:
-    return max(0.0, 100.0 * (1.0 - exposure / BUDGET_MINUTES))
+def _remaining_pct(exposure: float, total_minutes: float | None = None) -> float:
+    th = get_thresholds()
+    total = total_minutes if total_minutes is not None else th["budget_total_minutes"]
+    return max(0.0, 100.0 * (1.0 - exposure / total))
 
 
 def update_exposure(
@@ -67,6 +72,9 @@ def update_exposure(
 
     w = exposure_weight(temp_c)
 
+    th = get_thresholds()
+    at_risk_thresh = th.get("budget_at_risk_pct", 20.0)
+
     for batch in batches:
         if batch.last_exposure_ts is not None:
             last_ts = batch.last_exposure_ts.replace(tzinfo=UTC) \
@@ -81,7 +89,7 @@ def update_exposure(
         batch.exposure_weighted_min += added
         batch.last_exposure_ts = ts
 
-        remaining = _remaining_pct(batch.exposure_weighted_min)
+        remaining = _remaining_pct(batch.exposure_weighted_min, th.get("budget_total_minutes", 60.0))
         old_status = batch.status
 
         if remaining == 0.0 and not batch.discard_latched:
@@ -97,7 +105,7 @@ def update_exposure(
             if publish_cmd_fn and fridge.device_id:
                 publish_cmd_fn(fridge.device_id, "LATCH_RED", {"batch": batch.code})
 
-        elif remaining < AT_RISK_THRESH and batch.status == "OK":
+        elif remaining < at_risk_thresh and batch.status == "OK":
             batch.status = "AT_RISK"
             logger.info("Batch %s AT_RISK (%.1f%% remaining)", batch.code, remaining)
             audit.append(db, actor="system", action="BATCH_AT_RISK", payload={

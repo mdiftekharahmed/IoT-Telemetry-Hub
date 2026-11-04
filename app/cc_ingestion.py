@@ -64,6 +64,13 @@ class IngestResult:
 def _log_security_event(db: Session, device_id: str | None, kind: str, excerpt: str) -> None:
     db.add(SecurityEvent(device_id=device_id, kind=kind, raw_excerpt=excerpt[:512]))
     db.flush()
+    try:
+        import app.audit as audit
+        audit.append(db, actor=device_id or "unknown",
+                     action=f"SECURITY_{kind}",
+                     payload={"kind": kind, "excerpt": excerpt[:256]})
+    except Exception as _exc:
+        logger.warning("Failed to write security audit entry: %s", _exc)
 
 
 def _parse_and_validate_payload(raw: bytes) -> dict:
@@ -92,9 +99,10 @@ def _check_timestamp(ts_epoch: int | float, window_s: int) -> None:
         raise SecurityRejection("STALE_TS", f"delta={now - float(ts_epoch):.1f}s")
 
 
-def _check_hmac(device_id: str, secret: str, msg: dict) -> None:
+def _check_hmac(device_id: str, secret: str, msg: dict, allowed_fields: set[str] | None = None) -> None:
+    fields = allowed_fields if allowed_fields is not None else ALLOWED_DATA_FIELDS
     d_canon = canonical_json({k: v for k, v in msg["d"].items()
-                               if k in ALLOWED_DATA_FIELDS})
+                               if k in fields})
     parts = [msg["dev"], str(msg["seq"]), str(msg["ts"]), msg["nonce"], d_canon]
     if not hmac_verify(secret, parts, msg.get("sig", "")):
         raise SecurityRejection("BAD_SIG")
@@ -170,7 +178,10 @@ def ingest_telemetry(
 
             try:
                 _check_timestamp(msg["ts"], ts_window_s)
-                _check_hmac(device_id, secret, msg)
+                from app.models import Parameter
+                enabled_params = set(db.scalars(select(Parameter.name).where(Parameter.enabled == True)).all())
+                allowed_fields = ALLOWED_DATA_FIELDS | enabled_params
+                _check_hmac(device_id, secret, msg, allowed_fields=allowed_fields)
                 _check_nonce(db, device_id, msg["nonce"])
             except SecurityRejection as exc:
                 _log_security_event(db, device_id, exc.kind, exc.detail)
@@ -180,15 +191,23 @@ def ingest_telemetry(
             reading = _build_reading(device_id, int(msg["seq"]), msg["ts"],
                                      msg.get("d", {}), ingested_at)
             try:
-                db.add(reading)
-                db.flush()
+                with db.begin_nested():
+                    db.add(reading)
+                    db.flush()
             except IntegrityError:
-                db.rollback()
                 return IngestResult("duplicate", duplicates=1)
 
             # Update device heartbeat
             device.last_seen = ingested_at
             device.last_seq  = int(msg["seq"])
+
+            if device.fridge_id:
+                try:
+                    from app.budget_engine import update_exposure
+                    ts_dt = reading.ts.replace(tzinfo=UTC) if reading.ts.tzinfo is None else reading.ts
+                    update_exposure(db, device.fridge_id, reading.temp_c, ts_dt)
+                except Exception as exc:
+                    logger.warning("Failed to update exposure for fridge %s: %s", device.fridge_id, exc)
 
     logger.info("cc/telemetry accepted device=%s seq=%s", device_id, msg["seq"])
     return IngestResult("accepted", accepted=1)
@@ -232,6 +251,26 @@ def ingest_sync(
                 _log_security_event(db, device_id, exc.kind, exc.detail)
                 return IngestResult("rejected")
 
+            # Verify envelope HMAC over dev|ts|nonce|first_seq|last_seq|count|readings_hash
+            env_sig = envelope.get("sig", "")
+            if env_sig:
+                import hashlib
+                readings_raw = envelope.get("readings", [])
+                readings_canon = canonical_json(readings_raw)
+                readings_hash = hashlib.sha256(readings_canon.encode()).hexdigest()
+                env_parts = [
+                    envelope.get("dev", device_id),
+                    str(envelope.get("ts", "")),
+                    envelope.get("nonce", ""),
+                    str(envelope.get("first_seq", "")),
+                    str(envelope.get("last_seq", "")),
+                    str(envelope.get("count", "")),
+                    readings_hash,
+                ]
+                if not hmac_verify(secret, env_parts, env_sig):
+                    _log_security_event(db, device_id, "BAD_SIG", "sync envelope")
+                    return IngestResult("rejected")
+
             readings = sorted(envelope.get("readings", []), key=lambda r: r["seq"])
             accepted = duplicates = 0
             ingested_at = utcnow()
@@ -240,15 +279,23 @@ def ingest_sync(
                 r = _build_reading(device_id, int(item["seq"]), item["ts"],
                                    item.get("d", {}), ingested_at)
                 try:
-                    db.add(r)
-                    db.flush()
+                    with db.begin_nested():
+                        db.add(r)
+                        db.flush()
                     accepted += 1
                 except IntegrityError:
-                    db.rollback()
                     duplicates += 1
 
             if accepted > 0:
                 device.last_seen = ingested_at
+                last_item = readings[-1]
+                device.last_seq = int(last_item["seq"])
+                if device.fridge_id:
+                    try:
+                        from app.budget_engine import recompute_exposure_from_history
+                        recompute_exposure_from_history(db, device.fridge_id)
+                    except Exception as exc:
+                        logger.warning("Failed to recompute exposure for fridge %s: %s", device.fridge_id, exc)
 
     logger.info("cc/sync device=%s accepted=%d duplicates=%d", device_id, accepted, duplicates)
     return IngestResult("accepted", accepted=accepted, duplicates=duplicates)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from pathlib import Path
 from typing import Any
 
@@ -46,8 +47,9 @@ def _build_xy(df: pd.DataFrame, horizon_steps: int = HORIZON_STEPS):
         "door_open", "door_open_s", "compressor_on",
         "duty_30m", "since_switch", "lockout_s",
     ]
-    X = df[feature_cols].iloc[:-horizon_steps].values
-    y = df["temp_c"].shift(-horizon_steps).dropna().values
+    shift_steps = horizon_steps if len(df) > horizon_steps + 10 else max(1, len(df) // 4)
+    X = df[feature_cols].iloc[:-shift_steps].values
+    y = df["temp_c"].shift(-shift_steps).dropna().values
     # align
     min_len = min(len(X), len(y))
     return X[:min_len], y[:min_len], feature_cols
@@ -129,7 +131,7 @@ def _load_model():
 
 
 def predict_next_30(readings: list[dict]) -> dict:
-    """Given recent readings (list of dicts with temp_c, etc.) return forecast."""
+    """Given recent readings (list of dicts with temp_c, etc.) return dual scenario forecast."""
     model, cols = _load_model()
     if model is None or len(readings) < 10:
         return {"available": False, "reason": "model not trained or insufficient data"}
@@ -139,20 +141,41 @@ def predict_next_30(readings: list[dict]) -> dict:
 
     # Use last row as current feature vector
     row = df[cols].iloc[-1:].values
-    predicted_temp = float(model.predict(row)[0])
+    raw_pred = float(model.predict(row)[0])
     cur_temp = float(df["temp_c"].iloc[-1])
-    breach = predicted_temp > 8.0 or predicted_temp < 2.0
 
-    breach_in_minutes = None
-    if breach:
-        if predicted_temp > 8.0 and cur_temp < 8.0:
-            breach_in_minutes = max(1, min(30, int(round(30.0 * (8.0 - cur_temp) / (predicted_temp - cur_temp)))))
-        elif predicted_temp < 2.0 and cur_temp > 2.0:
-            breach_in_minutes = max(1, min(30, int(round(30.0 * (cur_temp - 2.0) / (cur_temp - predicted_temp)))))
+    # Scenario 1: Compressor Working Normally
+    # Under active thermostat regulation, temperature stabilizes around setpoint ~4.2°C - 5.0°C
+    predicted_temp_normal = min(max(raw_pred, 2.2), 7.8) if 2.0 <= cur_temp <= 8.0 else raw_pred
+    breach_normal = predicted_temp_normal > 8.0 or predicted_temp_normal < 2.0
+
+    breach_in_minutes_normal = None
+    if breach_normal:
+        if predicted_temp_normal > 8.0 and cur_temp < 8.0:
+            breach_in_minutes_normal = max(1, min(30, int(round(30.0 * (8.0 - cur_temp) / (predicted_temp_normal - cur_temp)))))
+        elif predicted_temp_normal < 2.0 and cur_temp > 2.0:
+            breach_in_minutes_normal = max(1, min(30, int(round(30.0 * (cur_temp - 2.0) / (cur_temp - predicted_temp_normal)))))
         elif cur_temp > 8.0 or cur_temp < 2.0:
-            breach_in_minutes = 0
+            breach_in_minutes_normal = 0
 
-    # Build 11-point trajectory series (5 historical points, Now, 5 future points)
+    # Scenario 2: Compressor Turned Off (power cut or compressor failure)
+    # Passive warming according to Newton's law of cooling towards ambient room temp ~25°C
+    ambient_temp = 25.0
+    k_off = 0.00016  # calibrated thermal conductance rate (~0.16°C/min warming initially)
+    predicted_temp_off = ambient_temp - (ambient_temp - cur_temp) * math.exp(-k_off * 1800.0)
+    breach_off = predicted_temp_off > 8.0 or cur_temp > 8.0
+
+    breach_in_minutes_off = None
+    if cur_temp >= 8.0:
+        breach_in_minutes_off = 0
+    elif breach_off and (ambient_temp - cur_temp) > 0:
+        # Time to reach 8.0°C
+        ratio_to_8 = (ambient_temp - 8.0) / (ambient_temp - cur_temp)
+        if 0 < ratio_to_8 < 1.0:
+            t_breach_sec = -math.log(ratio_to_8) / k_off
+            breach_in_minutes_off = max(1, min(30, int(round(t_breach_sec / 60.0))))
+
+    # Build 12-point trajectory series (5 historical points, Now, 6 future points)
     n = len(df)
     hist_steps = [max(0, n - 1 - int(i * (n / 10))) for i in range(5, 0, -1)]
     points = []
@@ -163,43 +186,80 @@ def predict_next_30(readings: list[dict]) -> dict:
         points.append({
             "label": f"-{step_min}m",
             "temp": val,
+            "temp_normal": val,
+            "temp_off": val,
             "type": "history",
             "predicted_temp": val,
             "breach_prob": 0.0 if 2.0 <= val <= 8.0 else 1.0,
         })
     
     # Current point
+    cur_val = round(cur_temp, 2)
     points.append({
         "label": "Now",
-        "temp": round(cur_temp, 2),
+        "temp": cur_val,
+        "temp_normal": cur_val,
+        "temp_off": cur_val,
         "type": "current",
-        "predicted_temp": round(cur_temp, 2),
+        "predicted_temp": cur_val,
         "breach_prob": 0.0 if 2.0 <= cur_temp <= 8.0 else 1.0,
     })
     
     # Future projected points (+5m, +10m, +15m, +20m, +25m, +30m)
     for m in [5, 10, 15, 20, 25, 30]:
         ratio = m / 30.0
-        interp = cur_temp + (predicted_temp - cur_temp) * ratio
-        prob = 0.0
-        if interp > 8.0:
-            prob = min(1.0, (interp - 8.0) / 2.0)
-        elif interp < 2.0:
-            prob = min(1.0, (2.0 - interp) / 2.0)
+        interp_normal = cur_temp + (predicted_temp_normal - cur_temp) * ratio
+        t_sec = m * 60.0
+        interp_off = ambient_temp - (ambient_temp - cur_temp) * math.exp(-k_off * t_sec)
+
+        prob_normal = 0.0
+        if interp_normal > 8.0:
+            prob_normal = min(1.0, (interp_normal - 8.0) / 2.0)
+        elif interp_normal < 2.0:
+            prob_normal = min(1.0, (2.0 - interp_normal) / 2.0)
+
+        prob_off = 0.0
+        if interp_off > 8.0:
+            prob_off = min(1.0, (interp_off - 8.0) / 2.0)
+
         points.append({
             "label": f"+{m}m",
-            "temp": round(interp, 2),
+            "temp": round(interp_normal, 2),
+            "temp_normal": round(interp_normal, 2),
+            "temp_off": round(interp_off, 2),
             "type": "forecast",
-            "predicted_temp": round(interp, 2),
-            "breach_prob": round(prob, 2),
+            "predicted_temp": round(interp_normal, 2),
+            "breach_prob": round(prob_normal, 2),
+            "breach_prob_off": round(prob_off, 2),
         })
+
+    scenarios = {
+        "normal": {
+            "name": "Compressor Working Normally",
+            "predicted_temp_30m": round(predicted_temp_normal, 2),
+            "breach_predicted": breach_normal,
+            "breach_in_minutes": breach_in_minutes_normal,
+            "status": "Safe (2°C - 8°C)" if not breach_normal else "Breach Projected",
+        },
+        "compressor_off": {
+            "name": "Compressor Turned Off",
+            "predicted_temp_30m": round(predicted_temp_off, 2),
+            "breach_predicted": breach_off,
+            "breach_in_minutes": breach_in_minutes_off,
+            "status": f"Breach in ~{breach_in_minutes_off}m" if breach_in_minutes_off is not None else "Safe within 30m",
+        },
+    }
 
     return {
         "available": True,
-        "predicted_temp_30m": round(predicted_temp, 2),
-        "breach_predicted": breach,
-        "breach_in_minutes": breach_in_minutes,
         "current_temp": round(cur_temp, 2),
+        "predicted_temp_30m": round(predicted_temp_normal, 2),
+        "predicted_temp_30m_off": round(predicted_temp_off, 2),
+        "breach_predicted": breach_normal,
+        "breach_predicted_off": breach_off,
+        "breach_in_minutes": breach_in_minutes_normal,
+        "breach_in_minutes_off": breach_in_minutes_off,
+        "scenarios": scenarios,
         "forecast": points,
         "series": points,
     }

@@ -21,7 +21,7 @@ from fastapi import (
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
-from pydantic import AwareDatetime
+from pydantic import AwareDatetime, BaseModel
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -41,7 +41,7 @@ from app.models import (
 from app.schemas import (
     DeviceCreate, DeviceCreateOut, DeviceOut, DeviceUpdate,
     Login, ParameterCreate, ParameterOut, ParameterUpdate,
-    ProfileOut, ProfileUpdate, TelemetryOut, as_utc,
+    ProfileOut, ProfileUpdate, RefreshRequest, TelemetryOut, as_utc,
 )
 from app.security import (
     DUMMY_HASH, PharmOrAdmin, AdminOnly, AnyRole,
@@ -96,17 +96,30 @@ def authenticated(
     request: Request,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
     db: Annotated[Session, Depends(db_session)],
-) -> AdminSession:
-    """Legacy cookie/bearer session for the old admin SPA."""
+) -> AdminSession | User:
+    """Cookie/bearer session for legacy admin or ColdChain JWT user."""
     token = credentials.credentials if credentials else request.cookies.get("telemetry_session")
     if not credentials and request.method not in {"GET", "HEAD", "OPTIONS"}:
         if request.headers.get("X-Requested-With") != "telemetry-ui":
             raise HTTPException(403, "Same-origin request header required")
-    session = db.get(AdminSession, token_digest(token)) if token else None
-    if session is None or as_utc(session.expires_at) <= utcnow():
-        raise HTTPException(401, "Authentication required",
-                            headers={"WWW-Authenticate": "Bearer"})
-    return session
+    if token:
+        # Check ColdChain JWT
+        try:
+            secret = request.app.state.settings.coldchain_jwt_secret
+            payload = decode_access_token(token, secret)
+            user = db.get(User, int(payload["sub"]))
+            if user and user.active:
+                return user
+        except Exception:
+            pass
+
+        # Check legacy AdminSession
+        session = db.get(AdminSession, token_digest(token))
+        if session and as_utc(session.expires_at) > utcnow():
+            return session
+
+    raise HTTPException(401, "Authentication required",
+                        headers={"WWW-Authenticate": "Bearer"})
 
 
 DB   = Annotated[Session, Depends(db_session)]
@@ -198,6 +211,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app):
+        import os
+        import logging as _log
+        if not os.environ.get("PYTEST_CURRENT_TEST"):
+            with app.state.sessions() as _seed_db:
+                n = seed_system_parameters(_seed_db)
+                if n:
+                    _log.getLogger(__name__).info("Seeded %d system parameters into DB", n)
         yield
         engine.dispose()
 
@@ -304,15 +324,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return tokens
 
     @app.post("/api/cc/auth/refresh", tags=["cc-auth"])
-    def cc_refresh(request: Request, db: DB):
-        body = {}
-        try:
-            import asyncio
-            body = asyncio.get_event_loop().run_until_complete(request.json())
-        except Exception:
-            raise HTTPException(400, "JSON body with refresh_token required")
-        refresh_token = body.get("refresh_token", "")
-        payload = decode_refresh_token(refresh_token, settings.coldchain_jwt_secret)
+    async def cc_refresh(body: RefreshRequest, db: DB):
+        payload = decode_refresh_token(body.refresh_token, settings.coldchain_jwt_secret)
         user = db.get(User, int(payload["sub"]))
         if not user or not user.active:
             raise HTTPException(401, "User not found or inactive")
@@ -377,9 +390,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if db.scalar(select(func.count()).select_from(Device)) >= settings.max_devices:
             raise HTTPException(409, f"Maximum of {settings.max_devices} registered devices reached")
         device = Device(**body.model_dump())
-        alphabet = string.ascii_letters + string.digits
-        device.mqtt_password = "".join(secrets.choice(alphabet) for _ in range(16))
+        # Generate unique cryptographic HMAC secret (64-char hex)
+        device.mqtt_password = secrets.token_hex(32)
         db.add(device)
+        try:
+            curr_secrets = json.loads(settings.device_secrets_json)
+        except Exception:
+            curr_secrets = {}
+        curr_secrets[device.device_id] = device.mqtt_password
+        settings.device_secrets_json = json.dumps(curr_secrets)
         pw_file = Path("/secrets/mosquitto.passwd")
         if pw_file.exists():
             try:
@@ -419,27 +438,103 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 db.rollback(); raise HTTPException(500, f"Failed to remove mosquitto password: {e}")
         db.commit(); return Response(status_code=204)
 
+    # System parameter keys come from the DB (seeded at startup by parameters_seed.py)
+    # Use SYSTEM_PARAMETER_KEYS from parameters_seed for guard checks
+    _PERM_KEYS: frozenset[str] = SYSTEM_PARAMETER_KEYS
+
     @app.get("/api/parameters", response_model=list[ParameterOut], tags=["parameters"])
     def parameters(auth: Auth, db: DB):
-        return db.scalars(select(Parameter).order_by(Parameter.name)).all()
+        params = db.scalars(select(Parameter).order_by(Parameter.name)).all()
+        return [
+            ParameterOut(
+                name=p.name,
+                unit=p.unit,
+                enabled=p.enabled,
+            )
+            for p in params
+        ]
+
+    @app.get("/api/admin/parameters", tags=["cc-admin"])
+    def admin_parameters(
+        db: DB,
+        current_user: Annotated[User, Depends(AdminOnly)],
+    ):
+        """Full parameter catalogue sourced entirely from DB (permanent + custom)."""
+        seed_system_parameters(db)
+        params = db.scalars(
+            select(Parameter).order_by(
+                Parameter.is_permanent.desc(),  # system params first
+                Parameter.name,
+            )
+        ).all()
+        return [
+            {
+                "name":         p.name,
+                "unit":         p.unit,
+                "description":  p.description,
+                "is_permanent": p.is_permanent,
+                "enabled":      p.enabled,
+            }
+            for p in params
+        ]
+
+    @app.delete("/api/admin/parameters/{name}/telemetry", status_code=204, tags=["cc-admin"])
+    def clear_parameter_telemetry(
+        name: str,
+        db: DB,
+        current_user: Annotated[User, Depends(AdminOnly)],
+    ):
+        """Remove all stored telemetry readings for a specific parameter key across all devices."""
+        from app.models import Telemetry as _Tel
+        db.execute(delete(_Tel).where(_Tel.parameter == name))
+        db.commit()
+        return Response(status_code=204)
 
     @app.post("/api/parameters", response_model=ParameterOut, status_code=201, tags=["parameters"])
     def add_parameter(body: ParameterCreate, auth: Auth, db: DB):
-        parameter = Parameter(**body.model_dump()); db.add(parameter); commit(db); return parameter
+        if body.name in _PERM_KEYS:
+            raise HTTPException(409, "Parameter is a permanent system parameter")
+        parameter = Parameter(
+            name=body.name,
+            unit=body.unit,
+            enabled=body.enabled,
+            is_permanent=False,
+            description="Custom telemetry parameter",
+        )
+        db.add(parameter)
+        commit(db)
+        return ParameterOut(
+            name=parameter.name,
+            unit=parameter.unit,
+            enabled=parameter.enabled,
+        )
 
     @app.put("/api/parameters/{name}", response_model=ParameterOut, tags=["parameters"])
     def update_parameter(name: str, body: ParameterUpdate, auth: Auth, db: DB):
         parameter = db.get(Parameter, name)
-        if parameter is None: raise HTTPException(404, "Parameter not found")
+        if parameter is None:
+            raise HTTPException(404, "Parameter not found")
+        if name in _PERM_KEYS and not body.enabled:
+            raise HTTPException(400, "Permanent system parameter cannot be disabled")
         for key, value in body.model_dump(exclude_unset=True).items():
             setattr(parameter, key, value)
-        commit(db); return parameter
+        commit(db)
+        return ParameterOut(
+            name=parameter.name,
+            unit=parameter.unit,
+            enabled=parameter.enabled,
+            
+        )
 
     @app.delete("/api/parameters/{name}", status_code=204, tags=["parameters"])
     def remove_parameter(name: str, auth: Auth, db: DB):
+        if name in _PERM_KEYS:
+            raise HTTPException(400, "Permanent system parameter cannot be deleted")
         result = db.execute(delete(Parameter).where(Parameter.name == name))
-        if not result.rowcount: raise HTTPException(404, "Parameter not found")
-        db.commit(); return Response(status_code=204)
+        if not result.rowcount:
+            raise HTTPException(404, "Parameter not found")
+        db.commit()
+        return Response(status_code=204)
 
     @app.get("/api/telemetry", response_model=list[TelemetryOut], tags=["telemetry"])
     def telemetry(auth: Auth, db: DB,
@@ -584,6 +679,89 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             stmt = stmt.where(Reading.ts <= datetime.fromisoformat(to_ts))
         return [_reading_dict(r) for r in db.scalars(stmt).all()]
 
+    @app.get("/api/readings", tags=["cc-readings"])
+    def list_readings(
+        db: DB,
+        current_user: Annotated[User, Depends(AnyRole)],
+        device_id: str | None = Query(default=None),
+        from_ts:   str | None = Query(default=None),
+        to_ts:     str | None = Query(default=None),
+        limit:     int = Query(default=50, ge=1, le=500),
+        offset:    int = Query(default=0, ge=0),
+    ):
+        """Query telemetry readings across all devices with timeline filters."""
+        stmt = select(Reading)
+        count_stmt = select(func.count()).select_from(Reading)
+
+        if device_id:
+            stmt = stmt.where(Reading.device_id == device_id)
+            count_stmt = count_stmt.where(Reading.device_id == device_id)
+        if from_ts:
+            dt_from = datetime.fromisoformat(from_ts)
+            stmt = stmt.where(Reading.ts >= dt_from)
+            count_stmt = count_stmt.where(Reading.ts >= dt_from)
+        if to_ts:
+            dt_to = datetime.fromisoformat(to_ts)
+            stmt = stmt.where(Reading.ts <= dt_to)
+            count_stmt = count_stmt.where(Reading.ts <= dt_to)
+
+        total = db.scalar(count_stmt) or 0
+        rows = db.scalars(stmt.order_by(Reading.ts.desc()).offset(offset).limit(limit)).all()
+        return {
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "items": [_reading_dict(r) for r in rows],
+        }
+
+    @app.get("/api/readings/export", tags=["cc-readings"])
+    def export_readings(
+        db: DB,
+        current_user: Annotated[User, Depends(AnyRole)],
+        device_id: str | None = Query(default=None),
+        from_ts:   str | None = Query(default=None),
+        to_ts:     str | None = Query(default=None),
+        limit:     int = Query(default=10000, ge=1, le=50000),
+    ):
+        """Export telemetry readings to downloadable CSV."""
+        stmt = select(Reading)
+        if device_id:
+            stmt = stmt.where(Reading.device_id == device_id)
+        if from_ts:
+            stmt = stmt.where(Reading.ts >= datetime.fromisoformat(from_ts))
+        if to_ts:
+            stmt = stmt.where(Reading.ts <= datetime.fromisoformat(to_ts))
+
+        rows = db.scalars(stmt.order_by(Reading.ts.asc()).limit(limit)).all()
+
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow([
+            "id", "device_id", "seq", "timestamp_utc", "temp_c",
+            "compressor_on", "lockout_s", "door_open", "door_open_s",
+            "power_source", "mains_present", "battery_pct", "battery_v",
+            "state", "red_latched", "sim_mode", "ingested_at"
+        ])
+        for r in rows:
+            writer.writerow([
+                r.id, r.device_id, r.seq, as_utc(r.ts).isoformat(), r.temp_c,
+                1 if r.compressor_on else 0, r.lockout_s,
+                1 if r.door_open else 0, r.door_open_s,
+                r.power_source, 1 if r.mains_present else 0,
+                r.battery_pct if r.battery_pct is not None else "",
+                r.battery_v if r.battery_v is not None else "",
+                r.state, 1 if r.red_latched else 0, 1 if r.sim_mode else 0,
+                as_utc(r.ingested_at).isoformat(),
+            ])
+
+        output.seek(0)
+        filename = f"telemetry_{device_id or 'all'}_{utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
+        return Response(
+            content=output.getvalue(),
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
     @app.get("/api/dashboard/summary", tags=["cc-dashboard"])
     def dashboard_summary(db: DB, current_user: Annotated[User, Depends(AnyRole)]):
         fridges = db.scalars(select(Fridge)).all()
@@ -674,8 +852,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def reset_batch_discard(batch_id: int, body: dict, db: DB,
                              current_user: Annotated[User, Depends(AdminOnly)]):
         try:
+            from app.mqtt_publisher import publish_command as _pub_cmd
+            def _publish_fn(device_id: str, cmd_type: str, cmd_payload: dict):
+                try:
+                    _pub_cmd(settings, device_id, cmd_type, cmd_payload)
+                except Exception as _exc:
+                    logger.warning("Downlink %s to %s failed: %s", cmd_type, device_id, _exc)
             b = reset_discard(db, batch_id, actor=current_user.username,
-                              reason=body.get("reason", "admin reset"))
+                              reason=body.get("reason", "admin reset"),
+                              publish_cmd_fn=_publish_fn)
         except ValueError as exc:
             raise HTTPException(400, str(exc))
         db.commit()
@@ -812,6 +997,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # ColdChain – ML endpoints
     # =========================================================================
 
+    @app.get("/api/ml/forecast/all", tags=["cc-ml"])
+    def ml_forecast_all(db: DB, current_user: Annotated[User, Depends(AnyRole)]):
+        from app.ml.forecast import predict_next_30
+        fridges = db.scalars(select(Fridge).order_by(Fridge.id)).all()
+        results = []
+        for f in fridges:
+            item = {
+                "fridge_id": f.id,
+                "fridge_name": f.name,
+                "device_id": f.device_id,
+                "available": False,
+            }
+            if f.device_id:
+                rows = db.scalars(
+                    select(Reading).where(Reading.device_id == f.device_id)
+                    .order_by(Reading.ts.desc()).limit(300)
+                ).all()
+                if rows:
+                    readings = [{"t_s": i * 5, **_reading_dict(r)} for i, r in enumerate(reversed(rows))]
+                    pred = predict_next_30(readings)
+                    item.update(pred)
+            results.append(item)
+        return results
+
     @app.get("/api/ml/forecast/{fridge_id}", tags=["cc-ml"])
     def ml_forecast(fridge_id: int, db: DB,
                     current_user: Annotated[User, Depends(AnyRole)]):
@@ -872,13 +1081,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                   current_user: Annotated[User, Depends(AdminOnly)]):
         """Inject a simulation fault or change time-scale (admin only)."""
         device = db.get(Device, device_id)
-        if not device: raise HTTPException(404, "Device not found")
+        if not device:
+            raise HTTPException(404, "Device not found")
         audit_mod.append(db, actor=current_user.username, action="SIM_FAULT",
                          payload={"device_id": device_id, **body})
         db.commit()
-        # Push command to device via MQTT (worker publishes)
-        # The worker is a separate process; we store the command in the audit log
-        # and the next iteration of the worker picks it up from a command queue (TODO: event bus).
+        # Push SET_SIM / FAULT_INJECT command to the device via MQTT
+        try:
+            from app.mqtt_publisher import publish_command as _pub_cmd
+            cmd_type = body.get("cmd", "SET_SIM")
+            _pub_cmd(settings, device_id, cmd_type, body)
+        except Exception as _exc:
+            logger.warning("Downlink %s to %s failed: %s", cmd_type, device_id, _exc)
         return {"status": "fault injected", "device_id": device_id, "params": body}
 
     @app.patch("/api/admin/time-scale", tags=["cc-admin"])
@@ -891,7 +1105,40 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         audit_mod.append(db, actor=current_user.username, action="TIME_SCALE_CHANGED",
                          payload={"time_scale": new_scale})
         db.commit()
+        # Broadcast SET_SCALE to all registered devices
+        try:
+            from app.mqtt_publisher import publish_command as _pub_cmd
+            for dev in db.scalars(select(Device).where(Device.enabled == True)).all():
+                _pub_cmd(settings, dev.device_id, "SET_SCALE", {"time_scale": new_scale})
+        except Exception as _exc:
+            logger.warning("SET_SCALE broadcast failed: %s", _exc)
         return {"demo_time_scale": new_scale}
+
+    @app.get("/api/admin/thresholds", tags=["cc-admin"])
+    def get_system_thresholds(current_user: Annotated[User, Depends(AdminOnly)]):
+        """Retrieve the live dynamic system thresholds."""
+        from app.thresholds import get_thresholds
+        return get_thresholds()
+
+    @app.put("/api/admin/thresholds", tags=["cc-admin"])
+    def update_system_thresholds(
+        body: dict,
+        db: DB,
+        current_user: Annotated[User, Depends(AdminOnly)],
+    ):
+        """Update live dynamic system thresholds, persist to file, and downlink to devices."""
+        from app.thresholds import update_thresholds
+        try:
+            updated = update_thresholds(
+                body,
+                actor=current_user.username,
+                db=db,
+                settings=settings,
+            )
+            db.commit()
+            return updated
+        except ValueError as exc:
+            raise HTTPException(422, str(exc))
 
     @app.get("/api/report/summary", tags=["cc-report"])
     def report_summary(db: DB, current_user: Annotated[User, Depends(AnyRole)]):
@@ -911,3 +1158,4 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
 # Missing import fix – require_role used in audit/security routes above
 from app.security import require_role  # noqa: E402
+from app.parameters_seed import SYSTEM_PARAMETER_KEYS, seed_system_parameters

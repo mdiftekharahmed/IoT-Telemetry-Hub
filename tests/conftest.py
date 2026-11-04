@@ -7,6 +7,14 @@ from app.api import create_app
 from app.config import Settings
 from app.models import Admin
 from app.security import password_hasher
+from app.thresholds import reset_to_defaults
+
+
+@pytest.fixture(autouse=True)
+def clean_thresholds():
+    reset_to_defaults()
+    yield
+    reset_to_defaults()
 
 
 @pytest.fixture

@@ -1,0 +1,16 @@
+{
+  "temp_safe_min": 2.0,
+  "temp_safe_max": 8.0,
+  "temp_warning_low_band": 0.5,
+  "temp_warning_high_band": 0.5,
+  "compressor_on_temp": 7.0,
+  "compressor_off_temp": 3.0,
+  "compressor_min_off_s": 60,
+  "budget_threshold_temp": 8.0,
+  "budget_double_temp": 12.0,
+  "budget_total_minutes": 60.0,
+  "budget_at_risk_pct": 20.0,
+  "door_warning_s": 30,
+  "door_alarm_s": 60,
+  "ambient_temp_c": 25.0
+}

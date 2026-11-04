@@ -76,6 +76,9 @@ export const getSecurityEvents = (limit = 100) =>
 export const getMlForecast = (fridgeId: number) =>
   api.get(`/api/ml/forecast/${fridgeId}`).then(r => r.data)
 
+export const getMlForecastAll = () =>
+  api.get('/api/ml/forecast/all').then(r => r.data)
+
 export const getMlHealth = (fridgeId: number) =>
   api.get(`/api/ml/health/${fridgeId}`).then(r => r.data)
 
@@ -99,10 +102,48 @@ export const updateUser = (id: number, body: Partial<{ role: string; active: boo
 
 export const getDevices = () => api.get('/api/devices').then(r => r.data)
 
-// ── Admin controls ────────────────────────────────────────────────────────────
+export const createDevice = (body: { device_id: string; name: string }) =>
+  api.post('/api/devices', body).then(r => r.data)
+
+// ── Parameters ───────────────────────────────────────────────────────────────
+
+export const getParameters = () => api.get('/api/parameters').then(r => r.data)
+
+export const getAdminParameters = () =>
+  api.get('/api/admin/parameters').then(r => r.data)
+
+export const addParameter = (body: { name: string; unit?: string; enabled?: boolean }) =>
+  api.post('/api/parameters', body).then(r => r.data)
+
+export const updateParameter = (name: string, body: { unit?: string; enabled?: boolean }) =>
+  api.put(`/api/parameters/${name}`, body).then(r => r.data)
+
+export const deleteParameter = (name: string) =>
+  api.delete(`/api/parameters/${name}`).then(r => r.data)
+
+export const clearParameterTelemetry = (name: string) =>
+  api.delete(`/api/admin/parameters/${name}/telemetry`).then(r => r.data)
+
+// ── Admin Thresholds & Simulation ─────────────────────────────────────────────
+
+export const getThresholds = () =>
+  api.get('/api/admin/thresholds').then(r => r.data)
+
+export const updateThresholds = (body: Record<string, unknown>) =>
+  api.put('/api/admin/thresholds', body).then(r => r.data)
 
 export const setTimeScale = (time_scale: number) =>
   api.patch('/api/admin/time-scale', { time_scale }).then(r => r.data)
 
 export const simFault = (device_id: string, params: Record<string, unknown>) =>
   api.post(`/api/admin/sim/${device_id}`, params).then(r => r.data)
+
+// ── Telemetry Explorer ───────────────────────────────────────────────────────
+
+export const getReadings = (params?: {
+  device_id?: string
+  from_ts?: string
+  to_ts?: string
+  limit?: number
+  offset?: number
+}) => api.get('/api/readings', { params }).then(r => r.data)

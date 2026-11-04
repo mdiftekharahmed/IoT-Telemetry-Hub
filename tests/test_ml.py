@@ -14,7 +14,7 @@ from app.ml.forecast import predict_next_30, train as train_forecast
 from app.ml.health import score_health, train_health
 from app.ml.relocation import build_suggestion, confirm_suggestion
 from app.ml.simulator import generate_dataset, run_simulation
-from app.models import Batch, BatchMovement, Fridge, Reading, RelocationSuggestion, User
+from app.models import Batch, BatchMovement, Device, Fridge, Reading, RelocationSuggestion, User
 
 
 def test_thermal_simulator():
@@ -126,6 +126,11 @@ def test_relocation_suggestion_and_confirmation(application):
         db.add(user)
         db.flush()
         user_id = user.id
+
+        d1 = Device(device_id="dev-fail", name="Dev Fail", enabled=True)
+        d2 = Device(device_id="dev-good", name="Dev Good", enabled=True)
+        db.add_all([d1, d2])
+        db.flush()
 
         fridge1 = Fridge(name="FailingFridge", capacity_slots=5, device_id="dev-fail")
         fridge2 = Fridge(name="HealthyFridge", capacity_slots=5, device_id="dev-good")

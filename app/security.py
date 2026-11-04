@@ -109,13 +109,13 @@ def require_role(*roles: str):
             raise HTTPException(401, "Bearer token required")
         secret = _get_secret(request)
         payload = decode_access_token(credentials.credentials, secret)
-        if payload["role"] not in roles:
-            raise HTTPException(403, f"Role '{payload['role']}' is not allowed here")
-        # Fetch live user to check active flag
+        # Fetch live user from database to ensure immediate role changes take effect
         with request.app.state.sessions() as db:
             user = db.get(User, int(payload["sub"]))
         if not user or not user.active:
             raise HTTPException(403, "Account inactive")
+        if user.role not in roles:
+            raise HTTPException(403, f"Role '{user.role}' is not allowed here")
         return user
 
     return check

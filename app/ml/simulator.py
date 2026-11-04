@@ -87,19 +87,45 @@ def simulate_run(params: SimParams, seed: int | None = None) -> pd.DataFrame:
     return pd.DataFrame(records)
 
 
-def generate_dataset(n_runs: int = 200, seed: int = 42) -> pd.DataFrame:
+def run_simulation(
+    duration_hours: float = 1.0,
+    step_s: float = 5.0,
+    k_cool: float = 0.025,
+    run_id: int = 0,
+    seed: int | None = None,
+) -> pd.DataFrame:
+    """Convenience runner matching tests and simulation API."""
+    params = SimParams(
+        duration_s=duration_hours * 3600.0,
+        dt_s=step_s,
+        k_cool=k_cool,
+    )
+    df = simulate_run(params, seed=seed)
+    df["run_id"] = run_id
+    df["k_cool"] = k_cool
+    return df
+
+
+def generate_dataset(
+    n_runs: int = 200,
+    duration_hours: float | None = None,
+    step_s: float = 5.0,
+    seed: int = 42,
+) -> pd.DataFrame:
     """Generate diverse synthetic runs and concatenate into one DataFrame."""
     rng = random.Random(seed)
     frames = []
 
     for i in range(n_runs):
+        dur_s = (duration_hours * 3600.0) if duration_hours is not None else rng.uniform(1800.0, 7200.0)
         params = SimParams(
             T_amb     = rng.uniform(18.0, 30.0),
             tau       = rng.uniform(400.0, 800.0),
             k_cool    = rng.uniform(0.015, 0.040) * (0.5 if i % 5 == 0 else 1.0),  # weak comp
             d_door    = rng.uniform(0.003, 0.010),
             noise_std = rng.uniform(0.01, 0.05),
-            duration_s = rng.uniform(1800.0, 7200.0),
+            dt_s      = step_s,
+            duration_s = dur_s,
         )
         df = simulate_run(params, seed=seed + i)
         df["run_id"]  = i
@@ -108,3 +134,4 @@ def generate_dataset(n_runs: int = 200, seed: int = 42) -> pd.DataFrame:
         frames.append(df)
 
     return pd.concat(frames, ignore_index=True)
+

@@ -2,7 +2,7 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Refrigerator, Package, Bell, Shield,
   BrainCircuit, Settings, LogOut, Snowflake, WifiOff, Wifi,
-  ChevronRight,
+  ChevronRight, Activity,
 } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 import { useLiveFeed } from '../hooks/useLiveFeed'
@@ -13,6 +13,7 @@ const NAV = [
   { to: '/app/fridges',  icon: Refrigerator,    label: 'Fridges'              },
   { to: '/app/inventory',icon: Package,          label: 'Inventory'            },
   { to: '/app/alerts',   icon: Bell,             label: 'Alerts'               },
+  { to: '/app/telemetry',icon: Activity,         label: 'Telemetry'            },
   { to: '/app/ai',       icon: BrainCircuit,     label: 'AI Insights'          },
   { to: '/app/audit',    icon: Shield,           label: 'Audit & Security'     },
   { to: '/app/admin',    icon: Settings,         label: 'Admin',  adminOnly: true },

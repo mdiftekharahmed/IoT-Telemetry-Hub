@@ -168,3 +168,89 @@ def confirm_suggestion(db: Session, suggestion_id: int,
         "moves": len(movements),
     })
     return movements
+
+
+def check_and_trigger_relocation(
+    db: Session,
+    fridge_id: int,
+    bot_token: str = "",
+    chat_id: str = "",
+) -> RelocationSuggestion | None:
+    """Trigger relocation if forecast predicts breach or compressor health < 40.
+
+    Called from the ingest pipeline after each accepted reading.
+    De-duplicates by checking if a pending suggestion already exists.
+    """
+    import app.audit as audit_mod
+    import app.alerts as alert_mod
+    from app.ml.forecast import predict_next_30
+    from app.ml.health import score_health
+
+    # Skip if a pending suggestion already exists for this fridge
+    existing = db.scalar(
+        select(RelocationSuggestion).where(
+            RelocationSuggestion.from_fridge_id == fridge_id,
+            RelocationSuggestion.status == "pending",
+        )
+    )
+    if existing:
+        logger.debug("Pending relocation suggestion already exists for fridge %d", fridge_id)
+        return None
+
+    fridge = db.get(Fridge, fridge_id)
+    if not fridge or not fridge.device_id:
+        return None
+
+    # Run forecast and health check
+    try:
+        forecast_results = predict_next_30(db, fridge.device_id)
+    except Exception as exc:
+        logger.debug("Forecast unavailable for fridge %d: %s", fridge_id, exc)
+        forecast_results = {}
+
+    try:
+        health_result = score_health(db, fridge.device_id)
+    except Exception as exc:
+        logger.debug("Health score unavailable for fridge %d: %s", fridge_id, exc)
+        health_result = {}
+
+    breach_predicted = forecast_results.get("breach_predicted", False)
+    health_score = health_result.get("score", 100.0)
+    health_low = health_score < HEALTH_ALERT_THRESHOLD
+
+    if not breach_predicted and not health_low:
+        return None
+
+    logger.info(
+        "Relocation trigger: fridge=%d breach_predicted=%s health=%.1f",
+        fridge_id, breach_predicted, health_score,
+    )
+
+    suggestion = build_suggestion(db, fridge_id, forecast_results, health_result)
+    if suggestion is None:
+        return None
+
+    audit_mod.append(db, actor="system", action="RELOCATION_SUGGESTED", payload={
+        "fridge_id": fridge_id,
+        "suggestion_id": suggestion.id,
+        "breach_predicted": breach_predicted,
+        "health_score": health_score,
+    })
+
+    # Fire alert
+    if breach_predicted:
+        alert_mod.fire(
+            db, "predicted_breach",
+            f"🔮 Predicted breach in 30 min for fridge {fridge.name} — relocation suggested",
+            device_id=fridge.device_id,
+            bot_token=bot_token, chat_id=chat_id,
+        )
+    if health_low:
+        alert_mod.fire(
+            db, "health_low",
+            f"🔧 Compressor health {health_score:.0f}/100 on {fridge.name} — relocation suggested",
+            device_id=fridge.device_id,
+            bot_token=bot_token, chat_id=chat_id,
+        )
+
+    return suggestion

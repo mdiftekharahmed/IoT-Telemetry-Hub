@@ -16,28 +16,47 @@ A production-ready backend for IoT devices, featuring an authenticated managemen
 
 ## Full Installation Process
 
-To install and run the full backend (including the PostgreSQL database, MQTT broker, and API) on a fresh Linux server (e.g., Ubuntu), use the automated `install.sh` script.
+To install and run the full stack (Docker, PostgreSQL, Mosquitto MQTT, FastAPI
+backend, React dashboard, Caddy proxy) on a fresh Linux server (e.g. Ubuntu 24.04),
+use the automated `install.sh` script as a sudo-capable user (not root):
 
-1. **Run the installation script** (requires sudo privileges):
-   ```bash
-   sudo curl -fsSL https://raw.githubusercontent.com/mdiftekharahmed/IoT-Telemetry-Hub/main/install.sh | bash
-   ```
-2. **Follow the on-screen prompts**:
-   - The script will automatically install Docker and its dependencies.
-   - It will prompt you to set up passwords and environment variables.
-   - It builds the Docker images and starts all backend services.
-3. **Admin Account Auto-Generated**:
-   - The installation script will automatically generate a secure admin account for you.
-   - At the very end of the installation, a summary screen will print your `Admin Username` (admin) and your `Admin Password`. **Save these credentials securely!**
-4. **Access the Dashboard**:
-   - Navigate to `https://<your-server-ip>` in your web browser. (Note: Because it uses a self-signed certificate by default, your browser will show a security warning. Click "Advanced" and "Proceed" to bypass it).
-   - Log in using the admin account printed in your terminal.
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/mdiftekharahmed/IoT-Telemetry-Hub/main/install.sh)
+# or:
+curl -fsSL https://raw.githubusercontent.com/mdiftekharahmed/IoT-Telemetry-Hub/main/install.sh | bash
+```
+
+The script will:
+1. Install Docker Engine and required system packages.
+2. Clone the repository to `/opt/coldchain` (a fresh server needs nothing preinstalled).
+3. Prompt for a domain/IP, generate secure secrets, and write the `.env` file and the
+   Mosquitto broker credentials (`secrets/mosquitto.passwd`).
+4. Build the images, run database migrations, seed demo data, and train the ML models.
+5. Create the admin accounts and enable the `coldchain.service` systemd auto-start.
+
+Admin credentials to note:
+- Seeded admin: `admin` / `admin123` (**change this** from the admin panel).
+- Demo users: `pharmacist1` / `pharma123` and `inspector1` / `inspect123`.
+- Five extra administrators are created (`mehedi1`–`mehedi5`); their passwords are
+  printed at the end of the install together with all generated secrets — save them.
+
+Deploy a specific branch instead of the GitHub default (e.g. the hackathon build):
+
+```bash
+REPO_BRANCH=BUBT_IOT_HACKATHON bash install.sh
+```
+
+Access the dashboard at `https://<your-server-ip>`. Caddy serves HTTPS with its
+internal CA by default, so the browser shows a security warning — click
+**Advanced → Proceed**. To use a trusted Let's Encrypt certificate later, point a
+real domain at the server, remove the single `tls internal` line from
+`/opt/coldchain/Caddyfile`, and restart the service (Caddy auto-requests the certificate).
 
 ### Managing the Background Service
 The installation script creates a systemd service so your hub automatically starts on boot.
-- Check Status: `sudo systemctl status iot-telemetry-hub`
-- Restart Hub: `sudo systemctl restart iot-telemetry-hub`
-- View Logs: `sudo journalctl -u iot-telemetry-hub -f`
+- Check Status: `sudo systemctl status coldchain`
+- Restart Hub: `sudo systemctl restart coldchain`
+- View Logs: `sudo journalctl -u coldchain -f`
 
 ---
 
@@ -48,7 +67,7 @@ By default, the hub uses a self-signed certificate for the IP address. For a pro
 1. Register a free domain at [DuckDNS](https://www.duckdns.org/) or [No-IP] and point it to your server's IP address.
 2. Edit your Caddyfile:
    ```bash
-   nano /opt/iot-telemetry-hub/Caddyfile
+   nano /opt/coldchain/Caddyfile
    ```
 3. Replace the entire contents with:
    ```text
@@ -58,7 +77,7 @@ By default, the hub uses a self-signed certificate for the IP address. For a pro
    ```
 4. Restart the system:
    ```bash
-   sudo systemctl restart iot-telemetry-hub
+   sudo systemctl restart coldchain
    ```
 Caddy will automatically request and renew a trusted Let's Encrypt certificate for your domain.
 

@@ -13,6 +13,7 @@ import { InventoryPage }   from './pages/InventoryPage'
 import { AlertsPage }      from './pages/AlertsPage'
 import { AuditPage }       from './pages/AuditPage'
 import { AiInsightsPage }  from './pages/AiInsightsPage'
+import { TelemetryPage }   from './pages/TelemetryPage'
 import { AdminPage }       from './pages/AdminPage'
 import { PublicQrPage }    from './pages/PublicQrPage'
 
@@ -57,6 +58,7 @@ export default function App() {
               <Route path="inventory"    element={<InventoryPage />}     />
               <Route path="alerts"       element={<AlertsPage />}        />
               <Route path="audit"        element={<AuditPage />}         />
+              <Route path="telemetry"    element={<TelemetryPage />}     />
               <Route path="ai"           element={<AiInsightsPage />}    />
               <Route path="admin"        element={<AdminPage />}         />
             </Route>

@@ -103,8 +103,8 @@ def upgrade() -> None:
         sa.Column("ts_source", sa.String(16), nullable=False, server_default="ntp"),
         sa.Column("ingested_at", sa.DateTime(timezone=True), nullable=False,
                   server_default=sa.func.now()),
+        sa.UniqueConstraint("device_id", "seq", name="uq_readings_device_seq"),
     )
-    op.create_unique_constraint("uq_readings_device_seq", "readings", ["device_id", "seq"])
     op.create_index("ix_readings_device_ts", "readings", ["device_id", "ts"])
 
     # ── nonces ────────────────────────────────────────────────────────────────
@@ -116,8 +116,8 @@ def upgrade() -> None:
         sa.Column("nonce", sa.String(64), nullable=False),
         sa.Column("seen_at", sa.DateTime(timezone=True), nullable=False,
                   server_default=sa.func.now()),
+        sa.UniqueConstraint("device_id", "nonce", name="uq_nonces_device_nonce"),
     )
-    op.create_unique_constraint("uq_nonces_device_nonce", "nonces", ["device_id", "nonce"])
     op.create_index("ix_nonces_seen_at", "nonces", ["seen_at"])
 
     # ── security_events ───────────────────────────────────────────────────────
@@ -213,16 +213,20 @@ def upgrade() -> None:
     )
 
     # ── extend devices table ───────────────────────────────────────────────────
-    op.add_column("devices", sa.Column("last_seen", sa.DateTime(timezone=True), nullable=True))
-    op.add_column("devices", sa.Column("last_seq", sa.Integer, nullable=True))
-    op.add_column("devices", sa.Column("fridge_id", sa.Integer,
-                  sa.ForeignKey("fridges.id", ondelete="SET NULL"), nullable=True))
+    with op.batch_alter_table("devices") as batch_op:
+        batch_op.add_column(sa.Column("last_seen", sa.DateTime(timezone=True), nullable=True))
+        batch_op.add_column(sa.Column("last_seq", sa.Integer, nullable=True))
+        batch_op.add_column(sa.Column("fridge_id", sa.Integer,
+                            sa.ForeignKey("fridges.id", ondelete="SET NULL", name="fk_devices_fridge_id"), nullable=True))
+        batch_op.create_index("ix_devices_fridge_id", ["fridge_id"])
 
 
 def downgrade() -> None:
-    op.drop_column("devices", "fridge_id")
-    op.drop_column("devices", "last_seq")
-    op.drop_column("devices", "last_seen")
+    with op.batch_alter_table("devices") as batch_op:
+        batch_op.drop_index("ix_devices_fridge_id")
+        batch_op.drop_column("fridge_id")
+        batch_op.drop_column("last_seq")
+        batch_op.drop_column("last_seen")
     op.drop_table("relocation_suggestions")
     op.drop_table("ml_predictions")
     op.drop_table("alerts")

@@ -13,7 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from app.models import Batch, Fridge, User
+from app.models import Batch, Device, Fridge, User
 from app.security import create_tokens, password_hasher
 
 
@@ -46,6 +46,8 @@ def cc_users(application):
         db.flush()
 
         # Seed test fridge and batch
+        db.add(Device(device_id="fridge-A", name="Fridge A", enabled=True))
+        db.flush()
         f = Fridge(name="TestFridge-A", capacity_slots=10, location="Ward 1", device_id="fridge-A")
         db.add(f)
         db.flush()

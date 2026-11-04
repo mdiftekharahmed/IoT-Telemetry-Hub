@@ -4,20 +4,168 @@ import {
   DoorOpen, DoorClosed, Zap, ZapOff,
   Package, ChevronRight, Wifi, WifiOff,
 } from 'lucide-react'
+import {
+  ComposedChart, Area, Line,
+  ReferenceLine, ReferenceArea,
+  YAxis, ResponsiveContainer,
+} from 'recharts'
 import { TempGauge } from './TempGauge'
 import { BudgetBar }  from './BudgetBar'
 import { StatusBadge } from './StatusBadge'
 import type { FridgeSummary } from '../types'
 import { fmtDuration, fmtRelative, stateBg } from '../lib/utils'
 
-interface Props {
-  summary: FridgeSummary
+// ─── Prop types ──────────────────────────────────────────────────────────────
+
+interface SparkReading {
+  ts: string
+  temp_c: number
 }
 
-export function FridgeCard({ summary }: Props) {
+interface SparkForecast {
+  ts: string
+  temp_c: number
+}
+
+interface Props {
+  summary: FridgeSummary
+  /** Last ~12–60 readings (up to 1 h) for the mini sparkline */
+  recentReadings?: SparkReading[]
+  /** Optional 30-min forecast overlay */
+  forecastPoints?: SparkForecast[]
+  /** Number of readings buffered offline (badge shown when > 0) */
+  offlineBufferCount?: number
+}
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const NOMINAL_RUNTIME_HOURS = 4
+const SAFE_LOW  = 2   // °C
+const SAFE_HIGH = 8   // °C
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/** Format estimated battery runtime, e.g. "~2.5h" */
+function fmtBatteryRuntime(battery_pct: number): string {
+  const hours = battery_pct * (NOMINAL_RUNTIME_HOURS / 100)
+  return `~${hours.toFixed(1)}h`
+}
+
+// ─── Mini Sparkline ───────────────────────────────────────────────────────────
+
+interface SparklineProps {
+  recentReadings: SparkReading[]
+  forecastPoints: SparkForecast[]
+}
+
+interface ChartPoint {
+  ts: string
+  temp?: number
+  forecast?: number
+}
+
+function MiniSparkline({ recentReadings, forecastPoints }: SparklineProps) {
+  const historyData: ChartPoint[] = recentReadings.map(r => ({
+    ts:   r.ts,
+    temp: r.temp_c,
+  }))
+
+  const forecastData: ChartPoint[] = forecastPoints.map(p => ({
+    ts:       p.ts,
+    forecast: p.temp_c,
+  }))
+
+  const chartData: ChartPoint[] = [...historyData, ...forecastData]
+
+  // Y-axis domain with breathing room
+  const allTemps = [
+    ...recentReadings.map(r => r.temp_c),
+    ...forecastPoints.map(p => p.temp_c),
+  ]
+  const minTemp = allTemps.length ? Math.min(...allTemps, SAFE_LOW  - 1) : SAFE_LOW  - 2
+  const maxTemp = allTemps.length ? Math.max(...allTemps, SAFE_HIGH + 1) : SAFE_HIGH + 2
+  const yDomain: [number, number] = [Math.floor(minTemp - 0.5), Math.ceil(maxTemp + 0.5)]
+
+  if (chartData.length === 0) {
+    return (
+      <div className="h-[60px] flex items-center justify-center">
+        <span className="text-[9px] text-slate-600">No readings yet</span>
+      </div>
+    )
+  }
+
+  return (
+    <ResponsiveContainer width="100%" height={60}>
+      <ComposedChart data={chartData} margin={{ top: 4, right: 2, left: 0, bottom: 0 }}>
+        {/* Safe band shading (2–8 °C) */}
+        <ReferenceArea
+          y1={SAFE_LOW}
+          y2={SAFE_HIGH}
+          fill="#16a34a"
+          fillOpacity={0.10}
+          ifOverflow="hidden"
+        />
+
+        <YAxis domain={yDomain} hide allowDataOverflow />
+
+        {/* Safe-range boundary dashed red lines */}
+        <ReferenceLine
+          y={SAFE_LOW}
+          stroke="#ef4444"
+          strokeDasharray="3 2"
+          strokeWidth={1}
+          ifOverflow="visible"
+        />
+        <ReferenceLine
+          y={SAFE_HIGH}
+          stroke="#ef4444"
+          strokeDasharray="3 2"
+          strokeWidth={1}
+          ifOverflow="visible"
+        />
+
+        {/* Historical temperature area */}
+        <Area
+          type="monotone"
+          dataKey="temp"
+          stroke="#38bdf8"
+          strokeWidth={1.5}
+          fill="#38bdf8"
+          fillOpacity={0.12}
+          dot={false}
+          isAnimationActive={false}
+          connectNulls={false}
+        />
+
+        {/* Forecast overlay – dashed amber line */}
+        {forecastPoints.length > 0 && (
+          <Line
+            type="monotone"
+            dataKey="forecast"
+            stroke="#f59e0b"
+            strokeWidth={1.5}
+            strokeDasharray="4 3"
+            dot={false}
+            isAnimationActive={false}
+            connectNulls={false}
+          />
+        )}
+      </ComposedChart>
+    </ResponsiveContainer>
+  )
+}
+
+// ─── FridgeCard ───────────────────────────────────────────────────────────────
+
+export function FridgeCard({
+  summary,
+  recentReadings     = [],
+  forecastPoints     = [],
+  offlineBufferCount = 0,
+}: Props) {
   const { fridge, batches, online, demo_time_scale } = summary
-  const nav = useNavigate()
-  const r   = fridge.latest
+  const nav   = useNavigate()
+  const r     = fridge.latest
   const state = r?.state ?? 'SAFE'
 
   // Live door timer
@@ -28,9 +176,13 @@ export function FridgeCard({ summary }: Props) {
     return () => clearInterval(t)
   }, [r?.door_open, r?.door_open_s])
 
-  const bgClass    = stateBg(state)
+  const bgClass        = stateBg(state)
   const atRiskBatches  = batches.filter(b => b.status === 'AT_RISK').length
   const discardBatches = batches.filter(b => b.status === 'DISCARD').length
+
+  // Battery runtime – only shown when on battery power with a known %
+  const showBatteryRuntime = r?.mains_present === false && r?.battery_pct != null
+  const batteryRuntime     = showBatteryRuntime ? fmtBatteryRuntime(r!.battery_pct!) : null
 
   return (
     <div
@@ -54,6 +206,15 @@ export function FridgeCard({ summary }: Props) {
           )}
         </div>
         <div className="flex items-center gap-1.5">
+          {/* Offline buffer badge */}
+          {offlineBufferCount > 0 && (
+            <span
+              className="badge bg-amber-900/50 text-amber-300 border-amber-700/50 text-[9px]"
+              title={`${offlineBufferCount} reading(s) buffered offline`}
+            >
+              ↑{offlineBufferCount}
+            </span>
+          )}
           <StatusBadge status={state} size="sm" />
           <ChevronRight size={14} className="text-slate-500" />
         </div>
@@ -83,7 +244,7 @@ export function FridgeCard({ summary }: Props) {
             </span>
           </div>
 
-          {/* Power */}
+          {/* Power + battery runtime badge */}
           <div className="flex items-center gap-1.5">
             {r?.mains_present
               ? <Zap size={12} className="text-emerald-400" />
@@ -93,6 +254,14 @@ export function FridgeCard({ summary }: Props) {
               {r?.mains_present ? 'Mains' : 'Battery'}
               {r?.battery_pct != null && ` ${r.battery_pct.toFixed(0)}%`}
             </span>
+            {batteryRuntime && (
+              <span
+                className="badge bg-amber-900/50 text-amber-300 border-amber-700/50 text-[9px] ml-0.5"
+                title="Estimated battery runtime"
+              >
+                {batteryRuntime}
+              </span>
+            )}
           </div>
 
           {/* Batches */}
@@ -105,6 +274,14 @@ export function FridgeCard({ summary }: Props) {
             </span>
           </div>
         </div>
+      </div>
+
+      {/* Mini sparkline chart */}
+      <div className="border-t border-surface-700/60 pt-1.5 mb-2">
+        <MiniSparkline
+          recentReadings={recentReadings}
+          forecastPoints={forecastPoints}
+        />
       </div>
 
       {/* Budget bars (worst 2 batches) */}

@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy import select
 
 from app.budget_engine import exposure_weight, reset_discard, update_exposure
-from app.models import AuditLog, Batch, Fridge
+from app.models import AuditLog, Batch, Device, Fridge
 
 
 def test_exposure_weight():
@@ -27,6 +27,8 @@ def test_budget_accumulation_and_discard_latch(application):
     factory = application.state.sessions
 
     with factory.begin() as db:
+        db.add(Device(device_id="fridge-B", name="Fridge B", enabled=True))
+        db.flush()
         fridge = Fridge(name="BudgetFridge", capacity_slots=5, device_id="fridge-B")
         db.add(fridge)
         db.flush()
@@ -97,6 +99,8 @@ def test_admin_reset_discard(application):
     factory = application.state.sessions
 
     with factory.begin() as db:
+        db.add(Device(device_id="fridge-C", name="Fridge C", enabled=True))
+        db.flush()
         fridge = Fridge(name="ResetFridge", capacity_slots=5, device_id="fridge-C")
         db.add(fridge)
         db.flush()

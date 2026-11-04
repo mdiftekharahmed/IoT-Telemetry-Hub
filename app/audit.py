@@ -29,10 +29,11 @@ def _canonical(payload: dict) -> str:
 
 def _compute_hash(prev_hash: str, idx: int, ts: datetime,
                   actor: str, action: str, payload_json: str) -> str:
+    ts_utc = ts.replace(tzinfo=UTC) if ts.tzinfo is None else ts.astimezone(UTC)
     blob = (
         prev_hash
         + str(idx)
-        + ts.astimezone(UTC).isoformat()
+        + ts_utc.isoformat()
         + actor
         + action
         + payload_json
@@ -46,11 +47,11 @@ def _ensure_genesis(db: Session) -> None:
         ts = utcnow()
         payload_json = _canonical({"event": "genesis"})
         prev_hash = "0" * 64
-        h = _compute_hash(prev_hash, 0, ts, "system", "GENESIS", payload_json)
+        h = _compute_hash(prev_hash, 1, ts, "system", "GENESIS", payload_json)
         db.execute(
             text(
-                "INSERT INTO audit_log (ts, actor, action, payload_json, prev_hash, hash)"
-                " VALUES (:ts, :actor, :action, :payload, :prev, :hash)"
+                "INSERT INTO audit_log (idx, ts, actor, action, payload_json, prev_hash, hash)"
+                " VALUES (1, :ts, :actor, :action, :payload, :prev, :hash)"
             ),
             {"ts": ts, "actor": "system", "action": "GENESIS",
              "payload": payload_json, "prev": prev_hash, "hash": h},

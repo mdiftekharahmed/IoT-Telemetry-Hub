@@ -76,6 +76,7 @@ services:
         }
         check_certs
         mosquitto -c /mosquitto/config/mosquitto.conf &
+        MQTTPID=$$!
         L_PW=$$(stat -c %Y /secrets/mosquitto.passwd 2>/dev/null || echo 0)
         while true; do
           sleep 5
@@ -83,7 +84,7 @@ services:
           N_PW=$$(stat -c %Y /secrets/mosquitto.passwd 2>/dev/null || echo 0)
           if [ \"$$L_PW\" != \"$$N_PW\" ]; then RELOAD=1; L_PW=\"$$N_PW\"; fi
           if check_certs; then RELOAD=1; fi
-          if [ \"$$RELOAD\" = \"1\" ]; then kill -HUP %1; fi
+          if [ \"$$RELOAD\" = \"1\" ]; then kill -HUP \"$$MQTTPID\" && echo \"[watcher] reloaded mosquitto (SIGHUP)\"; fi
         done
       "
     restart: always

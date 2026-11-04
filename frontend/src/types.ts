@@ -136,3 +136,43 @@ export interface LiveEvent {
   device_id?: string
   data: Record<string, unknown>
 }
+
+export interface SystemThresholds {
+  temp_safe_min: number
+  temp_safe_max: number
+  temp_warning_low_band: number
+  temp_warning_high_band: number
+  compressor_on_temp: number
+  compressor_off_temp: number
+  compressor_min_off_s: number
+  budget_threshold_temp: number
+  budget_double_temp: number
+  budget_total_minutes: number
+  budget_at_risk_pct: number
+  door_warning_s: number
+  door_alarm_s: number
+  ambient_temp_c: number
+}
+
+export interface ParameterItem {
+  name: string
+  unit: string | null
+  enabled: boolean
+  is_permanent: boolean
+}
+
+export interface AdminParameterItem {
+  name: string
+  unit: string
+  description: string
+  is_permanent: boolean
+  enabled: boolean
+  in_db: boolean
+}
+
+export interface ReadingsResponse {
+  total: number
+  limit: number
+  offset: number
+  items: Reading[]
+}

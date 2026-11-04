@@ -14,6 +14,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY pyproject.toml alembic.ini ./
 COPY app ./app
 COPY migrations ./migrations
+COPY scripts ./scripts
 
 RUN pip install --no-cache-dir --no-deps . \
     && useradd --create-home appuser

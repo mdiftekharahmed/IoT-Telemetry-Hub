@@ -78,12 +78,14 @@ const int   DAYLIGHT_OFFSET = 0;
 #define OLED_RESET     -1
 #define SCREEN_ADDR  0x3C
 
-// Operational Thresholds
-const float COMP_ON_TEMP   = 7.0f;    // °C: Turn compressor ON when temp reaches this
-const float COMP_OFF_TEMP  = 3.0f;    // °C: Turn compressor OFF when temp cools to this
-const int   COMP_MIN_OFF_S = 60;      // Seconds: Minimum compressor lockout to prevent motor burn
-const int   DOOR_WARN_S    = 30;      // Seconds: Trigger WARNING state if door open > 30s
-const int   DOOR_ALARM_S   = 60;      // Seconds: Trigger BREACH state + Buzzer if door open > 60s
+// Operational Thresholds (Dynamic, updated live via downlink SET_CONFIG from Admin Panel)
+float compOnTemp        = 7.0f;    // °C: Turn compressor ON when temp reaches this
+float compOffTemp       = 3.0f;    // °C: Turn compressor OFF when temp cools to this
+int   compMinOffS       = 60;      // Seconds: Minimum compressor lockout to prevent motor burn
+int   doorWarnS         = 30;      // Seconds: Trigger WARNING state if door open > 30s
+int   doorAlarmS        = 60;      // Seconds: Trigger BREACH state + Buzzer if door open > 60s
+float tempSafeMin       = 2.0f;    // °C: Safe lower limit
+float tempSafeMax       = 8.0f;    // °C: Safe upper limit
 const int   TELEMETRY_INTERVAL_MS = 5000; // Normal live publish interval (5 seconds)
 const int   WATCHDOG_TIMEOUT_S    = 15;   // Hardware watchdog timeout
 
@@ -331,8 +333,8 @@ void updateCompressorFSM() {
   switch (compState) {
     case COMP_OFF_LOCKOUT: {
       uint32_t elapsed = nowSeconds - lastCompSwitchTime;
-      if (elapsed < (uint32_t)COMP_MIN_OFF_S) {
-        compLockoutRemainingS = COMP_MIN_OFF_S - elapsed;
+      if (elapsed < (uint32_t)compMinOffS) {
+        compLockoutRemainingS = compMinOffS - elapsed;
       } else {
         compLockoutRemainingS = 0;
         compState = COMP_OFF_READY;
@@ -344,8 +346,12 @@ void updateCompressorFSM() {
     case COMP_OFF_READY: {
       compLockoutRemainingS = 0;
       digitalWrite(PIN_RELAY_COMP, LOW);
+      // Battery operation: never allow compressor to start without mains power
+      if (!mainsPresent) {
+        break;  // Stay OFF_READY; compressor cannot run on battery
+      }
       // Turn ON if temperature exceeds upper threshold
-      if (currentTemp >= COMP_ON_TEMP) {
+      if (currentTemp >= compOnTemp) {
         compState = COMP_ON;
         lastCompSwitchTime = nowSeconds;
         digitalWrite(PIN_RELAY_COMP, HIGH);
@@ -355,9 +361,16 @@ void updateCompressorFSM() {
 
     case COMP_ON: {
       compLockoutRemainingS = 0;
+      // Force compressor OFF immediately if mains power lost
+      if (!mainsPresent) {
+        compState = COMP_OFF_LOCKOUT;
+        lastCompSwitchTime = nowSeconds;
+        digitalWrite(PIN_RELAY_COMP, LOW);
+        break;
+      }
       digitalWrite(PIN_RELAY_COMP, HIGH);
       // Turn OFF if temperature reaches or drops below lower threshold
-      if (currentTemp <= COMP_OFF_TEMP) {
+      if (currentTemp <= compOffTemp) {
         compState = COMP_OFF_LOCKOUT;
         lastCompSwitchTime = nowSeconds;
         digitalWrite(PIN_RELAY_COMP, LOW);
@@ -372,14 +385,26 @@ void updateCompressorFSM() {
 // ==============================================================================
 
 void updateNodeState() {
-  // If Red Latch is set, node is locked in DISCARD state
+  // If Red Latch is set, node is locked in DISCARD state regardless of temperature
   if (redLatched) {
     nodeState = "DISCARD";
-  } else if (currentTemp > 10.0f || currentTemp < 2.0f || doorOpenDurationS > (uint32_t)DOOR_ALARM_S) {
+    return;
+  }
+
+  // BREACH: T < tempSafeMin or T > tempSafeMax or door open >= doorAlarmS
+  if (currentTemp < tempSafeMin || currentTemp > tempSafeMax || doorOpenDurationS >= (uint32_t)doorAlarmS) {
     nodeState = "BREACH";
-  } else if (currentTemp > 8.0f || doorOpenDurationS > (uint32_t)DOOR_WARN_S) {
+  }
+  // WARNING: near thresholds or door open >= doorWarnS or lockout active or no mains
+  else if ((currentTemp >= tempSafeMin && currentTemp < (tempSafeMin + 0.5f)) ||
+           (currentTemp > (tempSafeMax - 0.5f) && currentTemp <= tempSafeMax) ||
+           doorOpenDurationS >= (uint32_t)doorWarnS ||
+           (compState == COMP_OFF_LOCKOUT && currentTemp > (tempSafeMax - 1.0f)) ||
+           !mainsPresent) {
     nodeState = "WARNING";
-  } else {
+  }
+  // SAFE: well within bounds and door closed
+  else {
     nodeState = "SAFE";
   }
 }
@@ -637,6 +662,19 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
       simTimeScale = msg.substring(idx + 8).toFloat();
       if (simTimeScale < 1.0f) simTimeScale = 1.0f;
     }
+  } else if (msg.indexOf("\"SET_CONFIG\"") >= 0) {
+    int idxOn = msg.indexOf("\"comp_on_temp\":");
+    if (idxOn >= 0) compOnTemp = msg.substring(idxOn + 15).toFloat();
+    int idxOff = msg.indexOf("\"comp_off_temp\":");
+    if (idxOff >= 0) compOffTemp = msg.substring(idxOff + 16).toFloat();
+    int idxLock = msg.indexOf("\"lockout_s\":");
+    if (idxLock >= 0) compMinOffS = msg.substring(idxLock + 12).toInt();
+    int idxMin = msg.indexOf("\"safe_min\":");
+    if (idxMin >= 0) tempSafeMin = msg.substring(idxMin + 11).toFloat();
+    int idxMax = msg.indexOf("\"safe_max\":");
+    if (idxMax >= 0) tempSafeMax = msg.substring(idxMax + 11).toFloat();
+    int idxDoor = msg.indexOf("\"door_alarm_s\":");
+    if (idxDoor >= 0) doorAlarmS = msg.substring(idxDoor + 15).toInt();
   }
 
   // Publish acknowledgement on cc/{dev}/ack

@@ -77,6 +77,11 @@ class ParameterOut(ParameterCreate):
     model_config = ConfigDict(from_attributes=True)
 
 
+class AdminParameterOut(ParameterOut):
+    is_permanent: bool = False
+    description: str | None = None
+
+
 class Login(InputModel):
     username: Identifier
     password: str = Field(min_length=1, max_length=1024)
@@ -148,3 +153,8 @@ class TelemetryOut(BaseModel):
     value: float
 
     _utc_dates = field_validator("timestamp", "received_at")(as_utc)
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, date, datetime
+import json
 
 from sqlalchemy import (
     Boolean, Date, DateTime, Float, ForeignKey,
@@ -41,9 +42,11 @@ class Device(Base):
 
 class Parameter(Base):
     __tablename__ = "parameters"
-    name:    Mapped[str]        = mapped_column(String(64), primary_key=True)
-    unit:    Mapped[str | None] = mapped_column(String(16), nullable=True)
-    enabled: Mapped[bool]       = mapped_column(Boolean, default=True)
+    name:         Mapped[str]        = mapped_column(String(64), primary_key=True)
+    unit:         Mapped[str | None] = mapped_column(String(16), nullable=True)
+    enabled:      Mapped[bool]       = mapped_column(Boolean, default=True)
+    is_permanent: Mapped[bool]       = mapped_column(Boolean, default=False, nullable=False)
+    description:  Mapped[str | None] = mapped_column(String(255), nullable=True)
 
 
 class IngestedMessage(Base):
@@ -215,8 +218,12 @@ class Nonce(Base):
 
 class SecurityEvent(Base):
     __tablename__ = "security_events"
+    __table_args__ = (
+        Index("ix_security_events_device", "device_id"),
+        Index("ix_security_events_created_at", "created_at"),
+    )
     id:         Mapped[int]         = mapped_column(Integer, primary_key=True)
-    device_id:  Mapped[str | None]  = mapped_column(String(64), nullable=True, index=True)
+    device_id:  Mapped[str | None]  = mapped_column(String(64), nullable=True)
     kind:       Mapped[str]         = mapped_column(String(32), nullable=False)
     raw_excerpt: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime]    = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -225,6 +232,9 @@ class SecurityEvent(Base):
 class AuditLog(Base):
     """Append-only hash-chained audit log. DB trigger blocks UPDATE/DELETE."""
     __tablename__ = "audit_log"
+    __table_args__ = (
+        Index("ix_audit_log_ts", "ts"),
+    )
     idx:          Mapped[int]      = mapped_column(Integer, primary_key=True, autoincrement=True)
     ts:           Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     actor:        Mapped[str]      = mapped_column(String(64), nullable=False)
@@ -239,6 +249,10 @@ class AuditLog(Base):
 
 class Alert(Base):
     __tablename__ = "alerts"
+    __table_args__ = (
+        Index("ix_alerts_device_type", "device_id", "type"),
+        Index("ix_alerts_created_at", "created_at"),
+    )
     id:              Mapped[int]         = mapped_column(Integer, primary_key=True)
     type:            Mapped[str]         = mapped_column(String(32), nullable=False)
     device_id:       Mapped[str | None]  = mapped_column(String(64), nullable=True)
@@ -256,6 +270,9 @@ class Alert(Base):
 
 class MlPrediction(Base):
     __tablename__ = "ml_predictions"
+    __table_args__ = (
+        Index("ix_ml_predictions_device_ts", "device_id", "ts"),
+    )
     id:             Mapped[int]         = mapped_column(Integer, primary_key=True)
     device_id:      Mapped[str]         = mapped_column(ForeignKey("devices.device_id"), nullable=False)
     ts:             Mapped[datetime]    = mapped_column(DateTime(timezone=True), nullable=False)
@@ -263,6 +280,7 @@ class MlPrediction(Base):
     predicted_temp: Mapped[float|None]  = mapped_column(Float, nullable=True)
     breach_prob:    Mapped[float|None]  = mapped_column(Float, nullable=True)
     health_score:   Mapped[float|None]  = mapped_column(Float, nullable=True)
+
 
 
 class RelocationSuggestion(Base):
