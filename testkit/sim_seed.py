@@ -448,20 +448,21 @@ STATE_ICONS = {"SAFE": "🟢", "WARNING": "🟡", "BREACH": "🔴"}
 POWER_ICONS = {"MAINS": "⚡", "BATTERY": "🔋"}
 
 def status_line(sim: FridgeSim, d: dict) -> str:
-    state_icon = STATE_ICONS.get(d["state"], "❓")
-    power_icon = POWER_ICONS.get(d["power_source"], "❓")
-    door = "🚪OPEN " if d["door_open"] else "     "
-    comp = "❄️ " if d["compressor_on"] else "  "
+    state_icon = STATE_ICONS.get(d["state"], "?")
+    power_icon = POWER_ICONS.get(d["power_source"], "?")
+    door = "OPEN " if d["door_open"] else "     "
+    comp = "[COOL]" if d["compressor_on"] else "[    ]"
+    # heat_budget_minutes is local sim state — not sent over MQTT (not in ALLOWED_DATA_FIELDS)
     return (
         f"  {sim.device_id:<20} "
         f"seq={sim.seq:<6} "
-        f"temp={d['temp_c']:+6.2f}°C "
+        f"temp={d['temp_c']:+6.2f}C "
         f"{state_icon} {d['state']:<8} "
-        f"{comp} comp={'ON ' if d['compressor_on'] else 'OFF'} "
+        f"{comp} "
         f"lock={d['lockout_s']:>3}s "
-        f"{door}"
+        f"door={door} "
         f"{power_icon} bat={d['battery_pct']:>5.1f}% "
-        f"budget={d['heat_budget_minutes']:>5.1f}min"
+        f"budget={sim.heat_budget_minutes:>5.1f}min"
     )
 
 
