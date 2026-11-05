@@ -1,216 +1,335 @@
-# IoT Telemetry Hub
+# ColdChain Vaccine & Medicine Storage Monitor
 
-**Client documentation:** [User manual and administrator handover guide](CLIENT_USER_MANUAL.md) | [ESP32 TLS & SIM800L Firmware Security Guide](docs/tls-firmware-guide.md)
+> **Branch:** `BUBT_IOT_HACKATHON`  
+> **Client docs:** [User Manual & Admin Handover](CLIENT_USER_MANUAL.md) | [ESP32 TLS & Firmware Security Guide](docs/tls-firmware-guide.md)
 
-A production-ready backend for IoT devices, featuring an authenticated management API, global parameter whitelist, persistent telemetry storage, and a responsive administrative UI dashboard.
+A production-ready, end-to-end cold-chain monitoring platform for vaccine and medicine storage.  
+It combines an ESP32 IoT firmware, an MQTT broker, a FastAPI backend, a React dashboard, ML-powered temperature forecasting, and a Caddy HTTPS proxy — all orchestrated with Docker Compose and deployable in one command.
+
+---
 
 ## Features
 
-- **Responsive Web Dashboard**: Manage your devices, monitor health, and view data from any screen.
-- **MQTT Ingestion Engine**: Robust handling of incoming telemetry via MQTT with deduplication.
-- **Parameter Whitelisting**: Define exactly which sensor data you want to collect and their units.
-- **Data Export**: Export your historical data as wide-format CSVs.
-- **Secure**: Authentication required for all endpoints, profile management, and hashed passwords.
+| Category | Details |
+|---|---|
+| **Dashboard** | Real-time React SPA — temperature charts, device status, batch heat-budget gauges |
+| **Cold-Chain FSM** | SAFE / WARNING / BREACH state machine with red-latch discard alert |
+| **MQTT Security** | Per-device HMAC-SHA256 signed messages, nonce dedup, timestamp window guard |
+| **ML Forecast** | LightGBM temperature forecasting + isolation-forest compressor-health model |
+| **Alerts** | Telegram bot alerts for breach, door-open, power-fail, batch at-risk / discard |
+| **Role-Based Auth** | JWT — `admin`, `pharmacist`, `inspector` roles |
+| **Heat Budget** | Vaccine exposure tracking (VVM-equivalent) per batch per fridge |
+| **Auto HTTPS** | Caddy reverse proxy with self-signed cert for IP, or Let's Encrypt for a domain |
 
 ---
 
-## Full Installation Process
+## One-Line Install (Ubuntu 22.04 / 24.04)
 
-To install and run the full stack (Docker, PostgreSQL, Mosquitto MQTT, FastAPI
-backend, React dashboard, Caddy proxy) on a fresh Linux server (e.g. Ubuntu 24.04),
-use the automated `install.sh` script as a sudo-capable user (not root):
+> Works on a **fresh server** — Docker and all dependencies are installed automatically.
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/mdiftekharahmed/IoT-Telemetry-Hub/main/install.sh)
-# or:
-curl -fsSL https://raw.githubusercontent.com/mdiftekharahmed/IoT-Telemetry-Hub/main/install.sh | bash
+# Install from the hackathon branch (recommended):
+REPO_BRANCH=BUBT_IOT_HACKATHON bash <(curl -fsSL \
+  https://raw.githubusercontent.com/mdiftekharahmed/IoT-Telemetry-Hub/BUBT_IOT_HACKATHON/install.sh)
 ```
 
-The script will:
-1. Install Docker Engine and required system packages.
-2. Clone the repository to `/opt/coldchain` (a fresh server needs nothing preinstalled).
-3. Prompt for a domain/IP, generate secure secrets, and write the `.env` file and the
-   Mosquitto broker credentials (`secrets/mosquitto.passwd`).
-4. Build the images, run database migrations, seed demo data, and train the ML models.
-5. Create the admin accounts and enable the `coldchain.service` systemd auto-start.
-
-Admin credentials to note:
-- Seeded admin: `admin` / `admin123` (**change this** from the admin panel).
-- Demo users: `pharmacist1` / `pharma123` and `inspector1` / `inspect123`.
-- Five extra administrators are created (`mehedi1`–`mehedi5`); their passwords are
-  printed at the end of the install together with all generated secrets — save them.
-
-Deploy a specific branch instead of the GitHub default (e.g. the hackathon build):
+Or fetch the script first and inspect it, then run:
 
 ```bash
-REPO_BRANCH=BUBT_IOT_HACKATHON bash install.sh
+curl -fsSL \
+  https://raw.githubusercontent.com/mdiftekharahmed/IoT-Telemetry-Hub/BUBT_IOT_HACKATHON/install.sh \
+  -o install.sh
+bash install.sh
 ```
 
-Access the dashboard at `https://<your-server-ip>`. Caddy serves HTTPS with its
-internal CA by default, so the browser shows a security warning — click
-**Advanced → Proceed**. To use a trusted Let's Encrypt certificate later, point a
-real domain at the server, remove the single `tls internal` line from
-`/opt/coldchain/Caddyfile`, and restart the service (Caddy auto-requests the certificate).
+The installer will:
+1. Install Docker Engine + Compose plugin, `mosquitto-clients`, `curl`, `git`
+2. Clone the repo to `/opt/coldchain`
+3. Prompt for your server IP / domain, then generate all secrets and write `.env`
+4. Create the Mosquitto password file (`secrets/mosquitto.passwd`)
+5. Build all Docker images, run DB migrations, seed parameters
+6. Train the ML forecast and health models
+7. Create default users (`admin`, `pharmacist1`, `inspector1`, `mehedi1`–`mehedi5`)
+8. Register a `coldchain.service` systemd unit for auto-start on boot
 
-### Managing the Background Service
-The installation script creates a systemd service so your hub automatically starts on boot.
-- Check Status: `sudo systemctl status coldchain`
-- Restart Hub: `sudo systemctl restart coldchain`
-- View Logs: `sudo journalctl -u coldchain -f`
+**Default credentials** (change these in the Admin panel after first login):
+
+| Username | Password | Role |
+|---|---|---|
+| `admin` | `admin123` | Admin |
+| `pharmacist1` | `pharma123` | Pharmacist |
+| `inspector1` | `inspect123` | Inspector |
+| `mehedi1` … `mehedi5` | `Admin@mehedi1` … `Admin@mehedi5` | Admin |
+
+Access the dashboard at **`https://<your-server-ip>`**.  
+The browser shows a TLS warning for the self-signed cert — click **Advanced → Proceed**.
 
 ---
 
-## Securing with a Free Public SSL Certificate
+## Managing the Service
 
-By default, the hub uses a self-signed certificate for the IP address. For a proper, trusted HTTPS connection without browser warnings, you can get a free Let's Encrypt certificate:
+```bash
+sudo systemctl status   coldchain   # check if running
+sudo systemctl start    coldchain   # start (containers come up)
+sudo systemctl stop     coldchain   # stop (containers go down)
+sudo systemctl restart  coldchain   # restart
+sudo journalctl -u coldchain -f     # live logs
+```
 
-1. Register a free domain at [DuckDNS](https://www.duckdns.org/) or [No-IP] and point it to your server's IP address.
-2. Edit your Caddyfile:
+Manage individual containers:
+
+```bash
+cd /opt/coldchain
+docker compose ps                        # container health & ports
+docker compose logs -f api               # API logs
+docker compose logs worker | grep -E "outcome|Rejected|rejected|error|ERROR"  # MQTT worker errors
+docker compose restart proxy             # reload Caddy config
+```
+
+---
+
+## Full Nuke & Reinstall
+
+**Stop & remove the old ColdChain stack completely**, then reinstall:
+
+```bash
+# --- NUKE (run on the server) ---
+sudo systemctl stop coldchain 2>/dev/null
+sudo systemctl disable coldchain 2>/dev/null
+sudo rm -f /etc/systemd/system/coldchain.service
+sudo systemctl daemon-reload
+
+[ -d /opt/coldchain ] && \
+  cd /opt/coldchain && \
+  sudo docker compose down -v --rmi all
+
+cd / && sudo rm -rf /opt/coldchain
+
+# --- REINSTALL ---
+REPO_BRANCH=BUBT_IOT_HACKATHON bash <(curl -fsSL \
+  https://raw.githubusercontent.com/mdiftekharahmed/IoT-Telemetry-Hub/BUBT_IOT_HACKATHON/install.sh)
+```
+
+> **Legacy stack cleanup** — if you previously installed the old `iot-telemetry-hub` stack, remove it first:
+> ```bash
+> sudo systemctl stop iot-telemetry-hub 2>/dev/null
+> sudo systemctl disable iot-telemetry-hub 2>/dev/null
+> sudo rm -f /etc/systemd/system/iot-telemetry-hub.service
+> sudo systemctl daemon-reload
+> [ -d /opt/iot-telemetry-hub ] && \
+>   cd /opt/iot-telemetry-hub && \
+>   sudo docker compose down -v --rmi all
+> cd / && sudo rm -rf /opt/iot-telemetry-hub
+> ```
+
+---
+
+## Simulation Seed Script (`sim_seed.py`)
+
+`sim_seed.py` publishes realistic simulated fridge telemetry via MQTT every 5 seconds.  
+It auto-registers devices via the REST API and signs every message with HMAC-SHA256 — the same as a real ESP32 firmware node. **Press Ctrl+C to stop.**
+
+### Quick start
+
+```bash
+# Install dependencies (only needed once)
+pip install paho-mqtt requests
+
+# Run against the lab server (1 fridge, normal scenario)
+python sim_seed.py \
+  --host 100.108.219.54 \
+  --mqtt-pass ColdChainMQTT2024 \
+  --api-http          # use HTTP for API login (self-signed cert on IP)
+```
+
+### Multiple fridges & scenarios
+
+```bash
+# 3 fridges, rotating scenario (normal → door stuck → power fail → breach)
+python sim_seed.py --host 100.108.219.54 --mqtt-pass ColdChainMQTT2024 \
+  --fridges 3 --scenario cycle --api-http
+
+# Simulate a temperature breach (compressor failure)
+python sim_seed.py --host 100.108.219.54 --mqtt-pass ColdChainMQTT2024 \
+  --scenario breach --api-http
+
+# Door stuck open — triggers door-open alarm after 60 s
+python sim_seed.py --host 100.108.219.54 --mqtt-pass ColdChainMQTT2024 \
+  --scenario door_stuck --api-http
+
+# Mains power failure — battery drains
+python sim_seed.py --host 100.108.219.54 --mqtt-pass ColdChainMQTT2024 \
+  --scenario power_fail --api-http
+```
+
+### Full CLI reference
+
+```
+usage: sim_seed.py [options]
+
+options:
+  --host HOST           MQTT broker / API host (default: 100.108.219.54)
+  --mqtt-port PORT      MQTT port (default: 1883)
+  --mqtt-user USER      MQTT username (default: collector)
+  --mqtt-pass PASS      MQTT password
+  --api-user USER       API username for device auto-registration (default: admin)
+  --api-pass PASS       API password (default: admin123)
+  --fridges N           Number of simulated fridges (default: 1)
+  --interval SECS       Publish interval in seconds (default: 5.0)
+  --api-http            Use plain HTTP for API calls (bypass self-signed TLS on IP)
+  --scenario SCENARIO   Simulation scenario:
+                          normal      steady cold, brief door opens every 3 min
+                          door_stuck  door held open 90 s every 5 min
+                          breach      compressor off, temp climbs to room temp
+                          power_fail  mains lost, battery drains
+                          cycle       rotates through all scenarios every 2 min
+```
+
+### Simulated telemetry fields
+
+| Field | Unit | Description |
+|---|---|---|
+| `temp_c` | °C | Fridge internal temperature (sine + noise, compressor physics) |
+| `door_open` | bool | Door state — 1 = open |
+| `door_open_s` | s | Cumulative seconds door has been open in current window |
+| `compressor_on` | bool | Compressor relay state |
+| `lockout_s` | s | Remaining compressor min-off lockout seconds |
+| `power_source` | text | `MAINS` or `BATTERY` |
+| `mains_present` | bool | 1 = AC present |
+| `battery_pct` | % | Backup battery state-of-charge |
+| `battery_v` | V | Battery terminal voltage |
+| `state` | text | FSM classification: `SAFE` / `WARNING` / `BREACH` |
+| `red_latched` | bool | Discard latch (breach scenario) |
+| `sim_mode` | bool | Always `1` — marks readings as simulated |
+
+---
+
+## Useful Diagnostic Commands
+
+```bash
+# MQTT worker — see if telemetry is accepted or rejected
+docker compose logs worker | grep -E "outcome|Rejected|rejected|error|ERROR"
+
+# Check all container health
+docker compose ps
+
+# Tail all logs
+docker compose logs -f
+
+# Test API health directly
+curl http://localhost:8000/health/ready
+
+# Test through Caddy proxy
+curl -sk https://localhost/health/ready
+
+# MQTT test publish (from the server)
+mosquitto_pub -h localhost -p 1883 \
+  -u collector -P ColdChainMQTT2024 \
+  -t 'cc/test/status' -m '{"status":"online"}'
+
+# Subscribe to all ColdChain telemetry
+mosquitto_sub -h localhost -p 1883 \
+  -u collector -P ColdChainMQTT2024 \
+  -t 'cc/#' -v
+```
+
+---
+
+## Securing with a Free Public TLS Certificate
+
+By default the hub uses a Caddy-managed self-signed cert for the IP address.  
+For a trusted HTTPS connection (no browser warning), point a free domain at your server:
+
+1. Register a free subdomain at [DuckDNS](https://www.duckdns.org/) and point it to your IP.
+2. Edit the Caddyfile on the server:
    ```bash
-   nano /opt/coldchain/Caddyfile
+   sudo nano /opt/coldchain/Caddyfile
    ```
-3. Replace the entire contents with:
-   ```text
+3. Replace `100.108.219.54` with your domain and remove the `tls internal` line:
+   ```caddyfile
    your-project.duckdns.org {
-       reverse_proxy api:8000
+       handle /api/* { reverse_proxy api:8000 }
+       handle /health/* { reverse_proxy api:8000 }
+       handle /check/* { reverse_proxy frontend:3000 }
+       handle /app* { reverse_proxy frontend:3000 }
+       handle { reverse_proxy frontend:3000 }
    }
    ```
-4. Restart the system:
+4. Restart:
    ```bash
    sudo systemctl restart coldchain
    ```
-Caddy will automatically request and renew a trusted Let's Encrypt certificate for your domain.
+   Caddy auto-requests and renews the Let's Encrypt certificate.
 
 ---
 
-## Device Registration & ESP32 Preparation
+## Device Registration & ESP32 Setup
 
-To get an ESP32 node sending data to your server, you need to register it in both the Web Dashboard and the MQTT Broker. 
+### Step 1 — Register the device in the dashboard
 
-### Step 1: Register in the Web Dashboard
-1. Log into your web dashboard.
-2. Go to the **Devices** tab.
-3. Click **Add Device** and enter a unique Device ID (e.g., `ESP32_NODE_01`) and a human-readable Name (e.g., `Greenhouse Sensor`).
-4. Ensure the device is toggled to **Active**.
+1. Log in → **Admin → Devices → Add Device**
+2. Enter a **Device ID** (e.g. `fridge-01`) and a friendly name
+3. The dashboard generates an HMAC secret — copy it
 
-### Step 2: Register Parameters
-1. Go to the **Parameters** tab in the dashboard.
-2. Click **Add Parameter** to whitelist the data your ESP32 will send (e.g., `temperature` with unit `°C`, `humidity` with unit `%`). 
+### Step 2 — Flash the secret into the ESP32 firmware
 
+The firmware uses HMAC-SHA256 to sign every telemetry message.  
+See [docs/tls-firmware-guide.md](docs/tls-firmware-guide.md) for the full firmware setup including TLS (MQTTS on port 8883).
 
-### Step 3: ESP32 Code Example (Arduino IDE)
+### MQTT topic format (ColdChain)
 
-The default MQTT connection port is **1883**. Use the following Arduino code template to connect your ESP32 to Wi-Fi and publish JSON telemetry to the server. 
+```
+cc/<device_id>/telemetry   # telemetry publish (device → broker)
+cc/<device_id>/sync        # offline batch upload
+cc/<device_id>/event       # events (mains_restored, door_open, …)
+cc/<device_id>/status      # heartbeat / LWT
+cc/<device_id>/cmd         # commands (broker → device)
+```
 
-**Dependencies**: Open the Library Manager in the Arduino IDE and install:
-1. **PubSubClient** (by Nick O'Leary)
-2. **ArduinoJson** (by Benoit Blanchon)
+### Message format
 
-```cpp
-#include <WiFi.h>
-#include <PubSubClient.h>
-#include <ArduinoJson.h>
-
-// 1. Wi-Fi Credentials
-const char* ssid = "YOUR_WIFI_SSID";
-const char* password = "YOUR_WIFI_PASSWORD";
-
-// 2. MQTT Broker Settings
-const char* mqtt_server = "YOUR_SERVER_IP_OR_DOMAIN";
-const int mqtt_port = 1883;
-// 3. Device Credentials (Must match exactly what you added in Step 1)
-const char* mqtt_user = "ESP32_NODE_01"; 
-const char* mqtt_pass = "your_secure_password";
-
-// The MQTT Topic must match the format: devices/<DEVICE_ID>/telemetry
-const char* mqtt_topic = "devices/ESP32_NODE_01/telemetry";
-
-WiFiClient espClient;
-PubSubClient client(espClient);
-unsigned long lastMsg = 0;
-unsigned int msgCounter = 1;
-
-void setup_wifi() {
-  delay(10);
-  Serial.println();
-  Serial.print("Connecting to ");
-  Serial.println(ssid);
-  WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println("\nWiFi connected. IP: ");
-  Serial.println(WiFi.localIP());
-}
-
-void reconnect() {
-  while (!client.connected()) {
-    Serial.print("Attempting MQTT connection...");
-    // Create a random client ID to avoid conflicts
-    String clientId = "ESP32Client-";
-    clientId += String(random(0xffff), HEX);
-    
-    // Attempt to connect using the device credentials
-    if (client.connect(clientId.c_str(), mqtt_user, mqtt_pass)) {
-      Serial.println("connected");
-    } else {
-      Serial.print("failed, rc=");
-      Serial.print(client.state());
-      Serial.println(" try again in 5 seconds");
-      delay(5000);
-    }
-  }
-}
-
-void setup() {
-  Serial.begin(115200);
-  setup_wifi();
-  client.setServer(mqtt_server, mqtt_port);
-}
-
-void loop() {
-  if (!client.connected()) {
-    reconnect();
-  }
-  client.loop();
-
-  unsigned long now = millis();
-  if (now - lastMsg > 10000) { // Send data every 10 seconds
-    lastMsg = now;
-
-    // Generate example sensor data
-    float temp = 24.0 + random(-10, 10) / 10.0;
-    float hum = 50.0 + random(-50, 50) / 10.0;
-    float sysTemp = 40.0 + random(-20, 20) / 10.0;
-  
-    // Create JSON payload
-    StaticJsonDocument<256> doc;
-    
-    // Unique message ID: MAC address + incrementing counter
-    String msgId = WiFi.macAddress() + "-" + String(msgCounter++);
-    doc["message_id"] = msgId;
-    
-    JsonObject values = doc.createNestedObject("values");
-    values["temperature"] = temp;
-    values["humidity"] = hum;
-    values["systemTemp"] = sysTemp; // Built-in health check parameter
-  
-    char jsonBuffer[256];
-    serializeJson(doc, jsonBuffer);
-  
-    Serial.print("Publishing message: ");
-    Serial.println(jsonBuffer);
-    
-    client.publish(mqtt_topic, jsonBuffer);
-  }
+```json
+{
+  "v":     1,
+  "dev":   "fridge-01",
+  "seq":   1042,
+  "ts":    1793812849,
+  "nonce": "a3f9c1d2e8b74f61",
+  "d": {
+    "temp_c": 4.72,
+    "door_open": 0,
+    "door_open_s": 0,
+    "compressor_on": 1,
+    "lockout_s": 0,
+    "power_source": "MAINS",
+    "mains_present": 1,
+    "battery_pct": 98.5,
+    "battery_v": 4.07,
+    "state": "SAFE",
+    "red_latched": 0,
+    "sim_mode": 0
+  },
+  "sig": "<hmac-sha256-hex>"
 }
 ```
 
+HMAC signing:
+```
+sig = HMAC-SHA256(device_secret_hex,
+        "dev|seq|ts|nonce|canonical_json(d)")
+```
+where `canonical_json` = sorted keys, no spaces, floats to 2 dp.
+
 ---
 
-## Advanced / Developer Notes
+## Developer Notes
 
-- **Docker Development Stack**: To run locally on Windows/Mac, copy `.env.example` to `.env`, create a `secrets/mosquitto.passwd` file using the mosquitto container, and run `docker compose up --build -d`.
-- **API Surface**: The FastAPI documentation is available at `/docs` when the server is running. All data operations are secured behind Bearer token authentication.
-- **System Health**: The system continuously monitors `systemTemp` from incoming devices to display health status in the UI. Ensure you configure `SYSTEM_TEMP_MIN` and `SYSTEM_TEMP_MAX` in your `.env` file to set acceptable thresholds.
+- **Local dev**: Copy `.env.example` to `.env`, fill in secrets, then `docker compose up --build -d`
+- **API docs**: `http://localhost:8000/docs` (FastAPI Swagger UI, available when running)
+- **Tests**: `pytest` — 105 tests covering ingestion, RBAC, ML, budget engine, E2E
+- **ML retrain**: `docker compose run --rm ml-train`
+- **DB migrations**: `docker compose run --rm migrate`
+
+---
+
+*BUBT IoT Hackathon 2024 — ColdChain team*

@@ -588,6 +588,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--api-pass",   default="admin123",        help="API password for device registration")
     p.add_argument("--fridges",    type=int, default=1,       help="Number of simulated fridges")
     p.add_argument("--interval",   type=float, default=5.0,   help="Publish interval in seconds")
+    p.add_argument("--api-http", action="store_true", default=False,
+                   help="Use plain HTTP (port 80) for API calls instead of HTTPS. "
+                        "Useful when the server uses a self-signed cert on an IP address.")
     p.add_argument(
         "--scenario",
         default="normal",
