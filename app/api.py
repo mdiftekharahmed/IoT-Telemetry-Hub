@@ -274,8 +274,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response.headers["Referrer-Policy"]         = "same-origin"
         response.headers["X-Frame-Options"]          = "DENY"
         if not request.url.path.startswith(("/docs", "/redoc")):
+            # The React SPA loads its typefaces from Google Fonts — browser
+            # pages may pull those origins, but the API stays fully 'self'.
+            api_only   = request.url.path.startswith("/api")
+            font_orig  = "" if api_only else "https://fonts.gstatic.com"
+            style_orig = "" if api_only else " https://fonts.googleapis.com"
             response.headers["Content-Security-Policy"] = (
-                "default-src 'self'; script-src 'self'; style-src 'self'; "
+                f"default-src 'self' {font_orig}; script-src 'self'; "
+                f"style-src 'self'{style_orig}; "
                 "img-src 'self' data:; connect-src 'self' ws: wss:; "
                 "frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
             )
@@ -287,12 +293,35 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/login",      include_in_schema=False)
     def login_page(): return FileResponse(assets / "templates" / "login.html")
 
-    @app.get("/",           include_in_schema=False)
     @app.get("/devices",    include_in_schema=False)
     @app.get("/parameters", include_in_schema=False)
     @app.get("/data",       include_in_schema=False)
     @app.get("/export",     include_in_schema=False)
     def admin_page(): return FileResponse(assets / "templates" / "app.html")
+
+    # ── React SPA at the root base ───────────────────────────────────────────
+    # The panel normally lives behind Caddy/nginx at domain:8080/app, but when
+    # the API is exposed directly (domain:8080/ via uvicorn or local runs) it
+    # must serve the built frontend at "/" too. Falls back to the legacy page
+    # when no SPA build is present (Docker api container / fresh checkouts).
+    spa_dist       = assets.parent / "frontend" / "dist"
+    spa_index_html = spa_dist / "index.html"
+
+    if (spa_dist / "assets").is_dir():
+        app.mount("/assets", StaticFiles(directory=spa_dist / "assets"), name="spa-assets")
+
+    def _spa_page(rel_path: str = ""):
+        """Built SPA page: any real file inside dist (favicon.svg, ...), else index.html."""
+        if spa_index_html.exists():
+            if rel_path:
+                target = (spa_dist / rel_path).resolve()
+                if target.is_file() and target.is_relative_to(spa_dist.resolve()):
+                    return FileResponse(target)
+            return FileResponse(spa_index_html)
+        return FileResponse(assets / "templates" / "app.html")
+
+    @app.get("/", include_in_schema=False)
+    def spa_root(): return _spa_page()
 
     # ── Health ────────────────────────────────────────────────────────────────
     @app.get("/health/live",  tags=["health"])
@@ -1081,6 +1110,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return [_device_dict(d, db) for d in
                 db.scalars(select(Device).order_by(Device.device_id)).all()]
 
+    @app.get("/api/cc/devices/{device_id}", tags=["cc-devices"])
+    def cc_device_get(device_id: str, db: DB,
+                      current_user: Annotated[User, Depends(AnyRole)]):
+        """Single device record (no secret payload; use /secret to reveal)."""
+        return _device_dict(device_or_404(db, device_id), db)
+
     @app.post("/api/cc/devices", status_code=201, tags=["cc-devices"])
     def cc_device_create(body: CcDeviceCreate, db: DB,
                          current_user: Annotated[User, Depends(AdminOnly)]):
@@ -1413,6 +1448,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "audit_entries": db.scalar(select(func.count()).select_from(AuditLog)),
             "demo_time_scale": settings.demo_time_scale,
         }
+
+    # ── SPA deep-link fallback (registered LAST so real routes always win) ───
+    # Deep links like /fridges/3 must serve the SPA shell; API/doc/asset
+    # namespaces stay 404-JSON instead of leaking HTML.
+    @app.get("/{spa_path:path}", include_in_schema=False)
+    def spa_fallback(spa_path: str):
+        if spa_path.split("/", 1)[0].lower() in ("api", "docs", "redoc", "openapi",
+                                                 "static", "health", "assets"):
+            raise HTTPException(404, "Not Found")
+        return _spa_page(spa_path)
 
     return app
 

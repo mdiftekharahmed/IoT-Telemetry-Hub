@@ -210,6 +210,19 @@ def ingest_telemetry(
                 except Exception as exc:
                     logger.warning("Failed to update exposure for fridge %s: %s", device.fridge_id, exc)
 
+                # AI relocation auto-trigger (report defect #1 — was orphaned).
+                # Runs ~1/min per fridge, or immediately when the fridge runs hot;
+                # refrains internally when a pending suggestion already exists.
+                try:
+                    from app.ml.relocation import check_and_trigger_relocation
+                    from app.thresholds import get_thresholds
+                    safe_max = float(get_thresholds().get("temp_safe_max", 8.0))
+                    if reading.seq % 25 == 0 or reading.temp_c > safe_max:
+                        check_and_trigger_relocation(db, device.fridge_id)
+                except Exception as exc:
+                    logger.warning("Relocation auto-trigger failed for fridge %s: %s",
+                                   device.fridge_id, exc)
+
     logger.info("cc/telemetry accepted device=%s seq=%s", device_id, msg["seq"])
     return IngestResult("accepted", accepted=1)
 

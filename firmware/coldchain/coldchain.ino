@@ -113,6 +113,8 @@ CompressorState compState = COMP_OFF_READY;
 uint32_t messageSeq = 1;
 bool simMode = true;                 // Defaults to simulation for dev / demo testing
 float simTimeScale = 1.0f;           // Demo acceleration factor
+bool simMainsFault = false;          // FAULT_INJECT: simulated mains loss (clears on next FAULT_INJECT)
+int8_t lastMainsPresent = -1;        // mains edge-detect state (-1 = unknown, first read)
 float currentTemp = 4.5f;            // Current internal temperature in °C
 bool doorOpen = false;
 uint32_t doorOpenStartTime = 0;
@@ -236,9 +238,24 @@ void initSensors() {
 }
 
 void readPowerStatus() {
-  // Mains detection: PIN_MAINS_SENSE is HIGH when AC power is present
+  // Simulated mains fault (FAULT_INJECT downlink): report mains lost while the
+  // flag is set — the whole demo chain (battery page, compressor force-off,
+  // power_fail server alert) becomes exercisable without touching hardware.
   int mainsRaw = digitalRead(PIN_MAINS_SENSE);
-  mainsPresent = (mainsRaw == HIGH);
+  bool newMains = (simMainsFault ? false : (mainsRaw == HIGH));
+
+  // Edge-detect mains transitions → publish cc/{dev}/event so the server
+  // raises power_fail / mains_restored alerts (mqtt_worker._handle_event).
+  if (lastMainsPresent != -1 && newMains != (bool)lastMainsPresent) {
+    String evt = "{\"type\":\"" + String(newMains ? "mains_restored" : "power_fail")
+               + "\",\"ts\":" + String((uint32_t)getCurrentEpoch()) + "}";
+    String evtTopic = "cc/" + String(DEVICE_ID) + "/event";
+    mqttClient.publish(evtTopic.c_str(), evt.c_str());
+    Serial.print("[PWR] mains transition -> ");
+    Serial.println(newMains ? "mains_restored" : "power_fail");
+  }
+  lastMainsPresent = newMains ? 1 : 0;
+  mainsPresent = newMains;
 
   // Read Battery ADC (GPIO34 via 2:1 voltage divider)
   int adcVal = analogRead(PIN_BATTERY_ADC);
@@ -675,6 +692,14 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
     if (idxMax >= 0) tempSafeMax = msg.substring(idxMax + 11).toFloat();
     int idxDoor = msg.indexOf("\"door_alarm_s\":");
     if (idxDoor >= 0) doorAlarmS = msg.substring(idxDoor + 15).toInt();
+  } else if (msg.indexOf("\"FAULT_INJECT\"") >= 0) {
+    // Simulated mains-power failure (pairs with sim-mode): each FAULT_INJECT
+    // toggles the simulated mains-present flag, so the OLED power page,
+    // compressor mains-guard, LEDs and telemetry (power_source/mains_present/
+    // battery drain) demonstrate power failure without touching hardware.
+    simMainsFault = !simMainsFault;
+    Serial.print("[CMD] FAULT_INJECT -> simulated mains fault = ");
+    Serial.println(simMainsFault ? "TRUE (running on battery)" : "FALSE (mains restored)");
   }
 
   // Publish acknowledgement on cc/{dev}/ack

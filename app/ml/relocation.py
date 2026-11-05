@@ -22,6 +22,20 @@ HEALTH_ALERT_THRESHOLD   = 40.0
 REMAINING_ALERT_THRESHOLD = 20.0
 
 
+def _reading_dict(r: Reading) -> dict:
+    """Minimal reading serializer for ML features (mirrors app.api._reading_dict)."""
+    return {
+        "device_id": r.device_id, "seq": r.seq,
+        "ts": r.ts.isoformat() if r.ts else None,
+        "temp_c": r.temp_c, "door_open": r.door_open,
+        "door_open_s": r.door_open_s, "compressor_on": r.compressor_on,
+        "lockout_s": r.lockout_s, "power_source": r.power_source,
+        "mains_present": r.mains_present, "battery_pct": r.battery_pct,
+        "battery_v": r.battery_v, "state": r.state,
+        "red_latched": r.red_latched, "sim_mode": r.sim_mode,
+    }
+
+
 def _free_slots(db: Session, fridge: Fridge) -> int:
     used = db.scalar(
         select(Batch).where(Batch.fridge_id == fridge.id, Batch.status != "DISCARD")
@@ -183,8 +197,6 @@ def check_and_trigger_relocation(
     """
     import app.audit as audit_mod
     import app.alerts as alert_mod
-    from app.ml.forecast import predict_next_30
-    from app.ml.health import score_health
 
     # Skip if a pending suggestion already exists for this fridge
     existing = db.scalar(
@@ -201,15 +213,27 @@ def check_and_trigger_relocation(
     if not fridge or not fridge.device_id:
         return None
 
+    # Build the recent-readings window the ML models expect (same shape as
+    # the /api/ml/* endpoints: dicts with t_s + the _reading_dict fields).
+    rows = db.scalars(
+        select(Reading).where(Reading.device_id == fridge.device_id)
+        .order_by(Reading.ts.desc()).limit(300)
+    ).all()
+    if len(rows) < 10:
+        return None
+    readings = [{"t_s": i * 5, **_reading_dict(r)} for i, r in enumerate(reversed(rows))]
+
     # Run forecast and health check
     try:
-        forecast_results = predict_next_30(db, fridge.device_id)
+        from app.ml.forecast import predict_next_30
+        forecast_results = predict_next_30(readings)
     except Exception as exc:
         logger.debug("Forecast unavailable for fridge %d: %s", fridge_id, exc)
         forecast_results = {}
 
     try:
-        health_result = score_health(db, fridge.device_id)
+        from app.ml.health import score_health
+        health_result = score_health(readings)
     except Exception as exc:
         logger.debug("Health score unavailable for fridge %d: %s", fridge_id, exc)
         health_result = {}

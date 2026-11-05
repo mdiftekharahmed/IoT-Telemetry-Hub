@@ -57,6 +57,20 @@ def test_ui_pages_and_assets(client):
         assert client.get(f"/static/{file}").status_code == 200
 
 
+def test_react_spa_at_root_and_deep_links(client):
+    """domain:8080/ and every deep link serve the panel (SPA when built, legacy app otherwise)."""
+    for path in ("/", "/app", "/app/admin", "/app/fridges", "/definitely-not-a-page"):
+        response = client.get(path)
+        assert response.status_code == 200, f"{path} → {response.status_code}"
+        assert "text/html" in response.headers["content-type"]
+        assert 'name="viewport"' in response.text
+        assert response.headers["x-frame-options"] == "DENY"
+    # unknown API-ish namespaces must 404 as JSON, never as SPA HTML
+    resp = client.get("/api/nonexistent")
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "Not Found"
+
+
 def test_workspace_summary(seeded, authenticated_client):
     summary = authenticated_client.get("/api/summary").json()
     assert summary == {

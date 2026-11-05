@@ -336,33 +336,41 @@ class SimPublisher:
 
     def publish(self, device_id: str, secret: str, seq: int, d: dict) -> bool:
         """Sign and publish a single telemetry reading. Returns True on success."""
-        ts    = int(time.time())
-        nonce = secrets.token_hex(8)
-
-        # Only include fields in ALLOWED_DATA_FIELDS — keep d clean
-        allowed = {
-            "temp_c", "door_open", "door_open_s", "compressor_on", "lockout_s",
-            "power_source", "mains_present", "battery_pct", "battery_v",
-            "state", "red_latched", "sim_mode",
-        }
-        d_clean = {k: v for k, v in d.items() if k in allowed}
-
-        d_canon = canonical_json(d_clean)
-        sig = hmac_sign(secret, [device_id, str(seq), str(ts), nonce, d_canon])
-
-        msg = json.dumps({
-            "v":     1,
-            "dev":   device_id,
-            "seq":   seq,
-            "ts":    ts,
-            "nonce": nonce,
-            "d":     d_clean,
-            "sig":   sig,
-        })
-
+        msg = build_envelope(device_id, secret, seq, d)
         topic = f"cc/{device_id}/telemetry"
         result = self._client.publish(topic, msg, qos=1)
         return result.rc == mqtt.MQTT_ERR_SUCCESS
+
+
+def build_envelope(device_id: str, secret: str, seq: int, d: dict) -> bytes:
+    """Build one HMAC-signed telemetry envelope exactly like the ESP32 firmware.
+
+    Module-level so tests can run the same bytes a live sim would publish
+    through the server's real ingestion path.
+    """
+    ts    = int(time.time())
+    nonce = secrets.token_hex(8)
+
+    # Only include fields in ALLOWED_DATA_FIELDS — keep d clean
+    allowed = {
+        "temp_c", "door_open", "door_open_s", "compressor_on", "lockout_s",
+        "power_source", "mains_present", "battery_pct", "battery_v",
+        "state", "red_latched", "sim_mode",
+    }
+    d_clean = {k: v for k, v in d.items() if k in allowed}
+
+    d_canon = canonical_json(d_clean)
+    sig = hmac_sign(secret, [device_id, str(seq), str(ts), nonce, d_canon])
+
+    return json.dumps({
+        "v":     1,
+        "dev":   device_id,
+        "seq":   seq,
+        "ts":    ts,
+        "nonce": nonce,
+        "d":     d_clean,
+        "sig":   sig,
+    }).encode("utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -413,16 +421,20 @@ def ensure_device(api_base: str, device_id: str, secret: str,
         if r.status_code in (200, 201):
             log.info("Device %s registered ✓", device_id)
             return True
-        else:
-            log.warning("Device register returned %s: %s", r.status_code, r.text[:200])
-            # Try alternate endpoint
-            r2 = session.post(f"{api_base}/api/devices", json=payload,
-                              headers=headers, timeout=10)
-            if r2.status_code in (200, 201):
-                log.info("Device %s registered via /api/devices ✓", device_id)
-                return True
-            log.error("Device register failed: %s", r2.text[:200])
-            return False
+        if r.status_code == 409:
+            # Already present (likely registered by an earlier run with the same
+            # stable secret) — publishing will verify normally.
+            log.info("Device %s already registered ✓", device_id)
+            return True
+        log.warning("Device register returned %s: %s", r.status_code, r.text[:200])
+        # Try alternate endpoint
+        r2 = session.post(f"{api_base}/api/devices", json=payload,
+                          headers=headers, timeout=10)
+        if r2.status_code in (200, 201, 409):
+            log.info("Device %s registered via /api/devices ✓", device_id)
+            return True
+        log.error("Device register failed: %s", r2.text[:200])
+        return False
     except Exception as e:
         log.error("Device register error: %s", e)
         return False

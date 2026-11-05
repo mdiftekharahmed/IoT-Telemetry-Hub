@@ -26,6 +26,25 @@ const queryClient = new QueryClient({
   },
 })
 
+/**
+ * Child routes shared by the /app base AND the root base — the panel lives at
+ * domain:8080/app, and domain:8080/ must render the identical dashboard
+ * (not a redirect), so both bases mount the same route element.
+ */
+const APP_SHELL_ROUTES = (
+  <>
+    <Route index               element={<DashboardPage />}   />
+    <Route path="fridges"      element={<FridgesPage />}     />
+    <Route path="fridges/:id"  element={<FridgeDetailPage />} />
+    <Route path="inventory"    element={<InventoryPage />}   />
+    <Route path="alerts"       element={<AlertsPage />}      />
+    <Route path="audit"        element={<AuditPage />}       />
+    <Route path="telemetry"    element={<TelemetryPage />}   />
+    <Route path="ai"           element={<AiInsightsPage />}  />
+    <Route path="admin"        element={<AdminPage />}       />
+  </>
+)
+
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -44,28 +63,20 @@ export default function App() {
             }}
           />
           <Routes>
-            {/* Public QR batch check — no auth */}
-            <Route path="/check/:token" element={<PublicQrPage />} />
+            {/* Public QR batch check — no auth (served at both bases) */}
+            <Route path="/check/:token"      element={<PublicQrPage />} />
+            <Route path="/app/check/:token"  element={<PublicQrPage />} />
 
-            {/* Auth page */}
+            {/* Auth pages — root base + /app base */}
+            <Route path="/login"     element={<LoginPage />} />
             <Route path="/app/login" element={<LoginPage />} />
 
-            {/* Protected app shell */}
-            <Route path="/app" element={<Layout />}>
-              <Route index               element={<DashboardPage />}    />
-              <Route path="fridges"      element={<FridgesPage />}       />
-              <Route path="fridges/:id"  element={<FridgeDetailPage />}  />
-              <Route path="inventory"    element={<InventoryPage />}     />
-              <Route path="alerts"       element={<AlertsPage />}        />
-              <Route path="audit"        element={<AuditPage />}         />
-              <Route path="telemetry"    element={<TelemetryPage />}     />
-              <Route path="ai"           element={<AiInsightsPage />}    />
-              <Route path="admin"        element={<AdminPage />}         />
-            </Route>
+            {/* Protected app shell — identical tree at /app/* AND root /* */}
+            <Route path="/app" element={<Layout />}>{APP_SHELL_ROUTES}</Route>
+            <Route path="/"    element={<Layout />}>{APP_SHELL_ROUTES}</Route>
 
-            {/* Default redirect */}
-            <Route path="/"   element={<Navigate to="/app" replace />} />
-            <Route path="*"   element={<Navigate to="/app" replace />} />
+            {/* Anything unknown → canonical /app base */}
+            <Route path="*" element={<Navigate to="/app" replace />} />
           </Routes>
         </AuthProvider>
       </BrowserRouter>

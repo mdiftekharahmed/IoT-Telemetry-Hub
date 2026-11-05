@@ -41,10 +41,10 @@ These three decisions are **fixed by the project owner** and override any firmwa
 
 | ID | Task | Target files | Done when |
 |---|---|---|---|
-| **P1.1** | **Non-stop 5 s simulation seed script.** Finite math-only thermal model per fridge: first-order cooling toward setpoint + compressor heat-pump term + door-open heat pulse + ambient drift + jitter, e.g. `next = temp + k*(amb-temp) + pump*comp_on + door_gain*door_open + noise`. Signs via HMAC envelope (mirror of `app/security.py`), publishes `cc/{dev}/telemetry` QoS 1 every 5 s. **Infinite loop; only Ctrl+C stops it.** Auto-registers devices via REST (admin creds) if missing. Scenario flags: `--scenario breach` (door stays open, ambient 30°C), `--scenario power-fail` (mains off → battery drain), `--fridges N`. *(root `sim_seed.py`, model + args)* | `sim_seed.py` | Start `python sim_seed.py` against localhost → dashboard fridges update forever at 5 s cadence; `--scenario breach` drives batches → AT_RISK → DISCARD + red latch downlink within ~30 min of simulated exposure; Ctrl+C is the only exit. Zero hardware. |
-| **P1.2** | **Wire the orphaned relocation auto-trigger** (defect #1, report 🔴). Call `check_and_trigger_relocation(db, device.fridge_id)` immediately after `update_exposure()` in the accepted-reading path; keep existing de-dup (one open suggestion per fridge). *(app/cc_ingestion.py:206-210 → app/ml/relocation.py:173)* | `app/cc_ingestion.py`, `app/ml/relocation.py`, `tests/test_ml.py` | With P1.1 running a breach scenario, a pending `RelocationSuggestion` row appears automatically; AI Insights page shows a confirmable card without any manual API call. Test: new `test_auto_relocation_triggered_on_reading`. |
-| **P1.3** | **Publish on door-state change** (defect #2, explicit spec line). In `readDoorStatus()` set a `doorChanged` flag → debounced immediate `publishTelemetry()` on every open/close transition, in addition to the 5 s timer. *(firmware/coldchain/coldchain.ino: readDoorStatus, loop 803-810)* | `firmware/coldchain/coldchain.ino` | Serial trace shows a publish exactly at door-open and door-close (beyond the 5 s tick); server door timer starts within ≤1 s of the physical change. |
-| **P1.4** | **Power-failure simulation button** (defect #3). Long-press (≥3 s) of existing button OR unhandled `FAULT_INJECT` downlink toggles simulated `mainsPresent=false` in sim-mode: LEDs → warning, OLED power page shows BATTERY, compressor force-off, telemetry flips `power_source=MAINS→BATTERY`, server raises `power_fail` Telegram alert. Second long-press restores mains (+ `mains_restored` alert). *(coldchain.ino:648-678, 349-378; app/api.py:1079-1096)* | `firmware/coldchain/coldchain.ino`, `app/cc_ingestion.py` (handle `FAULT_INJECT`) | Admin "Simulate Power Failure" (existing `POST /api/admin/sim/{dev}` → `FAULT_INJECT`) flips the whole observable chain within 5 s; button long-press does the same without the network. |
+| **P1.1** | **Non-stop 5 s simulation seed script.** Finite math-only thermal model per fridge: first-order cooling toward setpoint + compressor heat-pump term + door-open heat pulse + ambient drift + jitter, e.g. `next = temp + k*(amb-temp) + pump*comp_on + door_gain*door_open + noise`. Signs via HMAC envelope (mirror of `app/security.py`), publishes `cc/{dev}/telemetry` QoS 1 every 5 s. **Infinite loop; only Ctrl+C stops it.** Auto-registers devices via REST (admin creds) if missing. Scenario flags: `--scenario breach` (door stays open, ambient 30°C), `--scenario power-fail` (mains off → battery drain), `--fridges N`. *(root `sim_seed.py`, model + args)* | `sim_seed.py` | ✅ **DONE & VERIFIED** — envelope path proven byte-compatible by `tests/test_sim_seed_compat.py`; registration 409 handling fixed. |
+| **P1.2** | **Wire the orphaned relocation auto-trigger** (defect #1, report 🔴). Call `check_and_trigger_relocation(db, device.fridge_id)` immediately after `update_exposure()` in the accepted-reading path; keep existing de-dup (one open suggestion per fridge). *(app/cc_ingestion.py:206-210 → app/ml/relocation.py:173)* | `app/cc_ingestion.py`, `app/ml/relocation.py`, `tests/test_ml.py` | ✅ **DONE & VERIFIED** — trigger also had *wrong call signatures* (called `predict_next_30(db, id)`; functions take reading lists) → fixed with DB reading-window + mirrored field serializer; wired throttled (every 25th reading ≈ 1/min, or immediately when temp > `temp_safe_max`); test `test_relocation_autotrigger_wired`. |
+| **P1.3** | **Publish on door-state change** (defect #2, explicit spec line). In `readDoorStatus()` set a `doorChanged` flag → debounced immediate `publishTelemetry()` on every open/close transition, in addition to the 5 s timer. *(firmware/coldchain/coldchain.ino: readDoorStatus, loop 803-810)* | `firmware/coldchain/coldchain.ino` | ⬜ Open — hardware flash/verify needed. |
+| **P1.4** | **Power-failure simulation button** (defect #3). Long-press (≥3 s) of existing button OR unhandled `FAULT_INJECT` downlink toggles simulated `mainsPresent=false` in sim-mode: LEDs → warning, OLED power page shows BATTERY, compressor force-off, telemetry flips `power_source=MAINS→BATTERY`, server raises `power_fail` Telegram alert. Second long-press restores mains (+ `mains_restored` alert). *(coldchain.ino:648-678, 349-378; app/api.py:1079-1096)* | `firmware/coldchain/coldchain.ino`, `app/cc_ingestion.py` | ✅ **DONE (code)** — `FAULT_INJECT` now handled by firmware (toggles `simMainsFault`, drains to BATTERY view, compressor mains-guard engages); firmware also **publishes `cc/{dev}/event` on mains transitions** (power_fail / mains_restored) which previously never fired. Admin "Simulate Power Failure" (`POST /api/admin/sim/{dev}` → `FAULT_INJECT`) drives the full chain. Hardware verify ⬜. |
 | **P1.5** | **Device identity provisioning for two fridges** (defect #11). Move `DEVICE_ID` + secret out of the sketch constant into NVS keys written once by a provision step (serial CLI or first-boot Wi-Fi-captive); sketch reads `prefs.getString("dev_id")`. *(coldchain.ino:43, 189-208)* | `firmware/coldchain/coldchain.ino`, `docs/tls-firmware-guide.md` | Two identical flashed units identify as `fridge-A` / `fridge-B` without editing source; both appear on the dashboard. |
 
 ### Phase 2 — Realtime + audit integrity — ~2 sessions
@@ -98,9 +98,9 @@ The canonical registry in `app/parameters_seed.py` (matches the accepted paramet
 
 | # | Severity | Defect (report §6) | Fixed in |
 |---|---|---|---|
-| 1 | 🔴 High | Relocation auto-trigger orphaned | P1.2 |
+| 1 | 🔴 High | Relocation auto-trigger orphaned | P1.2 ✅ closed (+ fixed wrong ML call signatures) |
 | 2 | 🔴 Medium | No publish on door-state change | P1.3 |
-| 3 | 🔴 Medium | Power-failure sim button missing / `FAULT_INJECT` unhandled | P1.4 |
+| 3 | 🔴 Medium | Power-failure sim button missing / `FAULT_INJECT` unhandled | P1.4 ✅ closed (code) · hardware verify pending |
 | 4 | 🟡 Medium | WebSocket live feed never emits | P2.1 |
 | 5 | 🟡 Medium | `PATCH` batch fridge change bypasses movement/audit | P2.2 |
 | 6 | 🟠 Low | `remaining_pct` hardcodes /60 vs configurable total | P4.1 |
@@ -184,3 +184,72 @@ Python sim seed ★ — 5 s, infinite, scenarios (breach / power-fail / weakenin
 | **M6 — Submit** | P6.2–P6.4 | ~2 sessions |
 
 **Bottom line:** every ≤20-line fix from the report happens in Phase 1–2; the owner-locked decisions (server-owned budget, °C/min compressor health, infinite 5 s seed script) are enforced as contracts with acceptance checks, not aspirations. After M2 the system is fully demonstrable without hardware; after M5 the evidence pack writes itself.
+
+---
+
+## 8. Verification Run — 2026-11-05
+
+### 8.1 `sim_seed.py` — exact-job verification ✅
+
+The script **spoofs a real ESP node over the live MQTT path** — it does not touch the database (no DB imports at all). Verified end-to-end by the new permanent regression test `tests/test_sim_seed_compat.py`, which runs the script's *actual* data model and envelope bytes through the *actual* server ingestion path:
+
+| Check | Result |
+|---|---|
+| Publish cadence | `while True` loop, 5 s default (`--interval`), drift-compensated sleep; **Ctrl+C is the only stop path** ✅ |
+| Identity | Publishes to `cc/{dev}/telemetry` (same topic as `coldchain.ino`), client id `coldchain-sim-*` |
+| Envelope | HMAC-SHA256 over `dev‖seq‖ts‖nonce‖canonical_json(d)`; fresh 64-bit nonce + fresh ts per message — byte-exact firmware format |
+| Field contract | Sim payload keys ≡ `ALLOWED_DATA_FIELDS` (12 keys) — asserted equal in test ✅ |
+| Secret provenance | Registers device with `stable_secret()` via `POST /api/cc/devices` (user-set secret → DB); ingestion verifies **from the DB**, not env config ✅ |
+| Re-registration | `ensure_device` now treats 409 as "already registered" (and `GET /api/cc/devices/{id}` single-read endpoint added) — no more false alarms on re-runs ✅ |
+| Scenarios | `normal / door_stuck / breach / power_fail / cycle` drive the server-side budget → AT_RISK → DISCARD, alerts, and power events without hardware ✅ |
+| Test proof | `ingest_telemetry(factory, topic, build_envelope(...), {})` → `accepted`; rows persist; 5-tick burst all accepted ✅ |
+
+```
+sim_seed.py ──MQTT──▶ mqtt_worker ──▶ cc_ingestion (HMAC/ts/nonce/DB-secret checks)
+                                          │ accepted only
+                                          ▼
+                  readings + budget engine + relocation auto-trigger + alerts + audit
+```
+
+### 8.2 Downlink commands — what the server sends, and when
+
+| Command | Sent by | Trigger | Firmware handler |
+|---|---|---|---|
+| `LATCH_RED` | `budget_engine` | Batch heat budget hits 0 → DISCARD | `onMqttMessage` → `nodeState="DISCARD"`, solid red LED, NVS-persisted ✅ |
+| `RESET_RED` | `POST /api/batches/{id}/reset` (admin) | Admin clears discard latch | Clears latch → `SAFE` ✅ |
+| `SET_SIM` | `POST /api/admin/sim/{dev}` | Admin toggles sim mode | Toggles thermal-model mode ✅ |
+| `SET_SCALE` | `PATCH /api/admin/time-scale` | Demo time-scale change (broadcast) | Updates `simTimeScale` ✅ |
+| `SET_CONFIG` | `PUT /api/admin/thresholds` (broadcast) | Admin edits thresholds | Retunes `compOnTemp/compOffTemp/compMinOffS/safe_min/safe_max/doorAlarmS` ✅ |
+| `FAULT_INJECT` | `POST /api/admin/sim/{dev}` | **Power-failure demo button** | **NEW** — toggles `simMainsFault`: telemetry flips `MAINS→BATTERY`, compressor mains-guard force-stops, OLED battery page, `power_fail`/`mains_restored` events now published (edge-detected) → server Telegram alerts ✅ |
+
+**Compressor ON/OFF policy (per spec):** the server deliberately does **not** send real-time compressor commands. Spec task 1 requires node-local bang-bang control — ON at 7 °C, OFF at 3 °C, 60 s min-off lockout (`coldchain.ino` FSM `COMP_OFF_LOCKOUT → COMP_OFF_READY → COMP_ON`, hardware mains-guard: no start / force-stop on mains loss). The server shapes that policy remotely via `SET_CONFIG` (and demo-discards via `Latch/Reset`). This is the correct architecture: control survives Wi-Fi loss.
+
+### 8.3 Vaccine batch relocation — implementation status ✅ (was doubly broken)
+
+**Found:** (a) trigger `check_and_trigger_relocation()` had **zero production call sites** (docstring claimed otherwise); (b) even if called, it passed **wrong arguments** — `predict_next_30(db, device_id)` / `score_health(db, device_id)`, but both take a **readings list** → exceptions were swallowed, so suggestions could never be created. The Pharmacist 1-click confirm (`POST /api/ml/relocation/{id}/confirm`) was fully implemented and unaffected.
+
+**Fixed:**
+1. `relocation.py` now loads the last 300 readings from the DB and serializes them with a mirrored `_reading_dict()` (same shape as `/api/ml/*` endpoints) before calling the models.
+2. Trigger wired into the accepted-reading path of `cc_ingestion.py`, throttled: every **25th reading (≈1/min)** or **immediately when temp > `temp_safe_max`**; internal de-dup keeps at most one pending suggestion per fridge.
+3. Chain verified: reading → (trigger) forecast `breach_predicted` **OR** health < 40 → `build_suggestion()` (ranked: most exposed → nearest expiry → largest qty; targets with free slots, 2–8 °C, door closed) → persisted `RelocationSuggestion` + `RELOCATION_SUGGESTED` audit + Telegram alert → AI Insights card → **1-click confirm** executes actual `BatchMovement`s + audit.
+4. Test: `tests/test_sim_seed_compat.py::test_relocation_autotrigger_wired` proves the ingest path invokes the trigger on the intended cadence and not between cadence ticks.
+
+### 8.4 Root-URL web panel (`domain:8080/` alongside `domain:8080/app`) ✅
+
+The panel previously only worked at `/app` because (a) the React router treated `/` as a redirect, and (b) the Caddy site block did not listen on the host's `:8080` mapping. Fixed at four layers so the panel works at the root in **every** serving mode:
+
+| Layer | Change |
+|---|---|
+| React (`App.tsx`) | Identical protected route tree mounted at **both** `/app/*` and root `/*` (dashboard, fridges, inventory, alerts, audit, telemetry, ai, admin), plus root `/login` and root `/check/:token`; `/app` stays the canonical base for unknown paths. No redirect — `/` **is** the dashboard. |
+| FastAPI (`api.py`) | When a built SPA (`frontend/dist`) exists, `/` serves `index.html`, `dist/assets` is mounted at `/assets`, and a last-registered `GET /{spa_path:path}` catch-all serves real `dist` files (favicon etc.) / `index.html` for deep links — with API/doc/static/health namespaces returned as 404 JSON, never HTML. Legacy pages (`/devices`, `/parameters`, `/data`, `/export`) unchanged. CSP now permits Google-Fonts origins on browser pages only (API stays fully `self`). |
+| Caddy (`Caddyfile`) | Site block now also listens on `:8080` (the host's external panel port), so `/` and `/app` proxy identically there. |
+| Compose (`compose.yaml`) | Proxy publishes `"8080:8080"`. |
+
+Test lock: `tests/test_ui.py::test_react_spa_at_root_and_deep_links` (200 HTML with viewport + DENY at `/`, `/app`, `/app/admin`, deep links; `/api/*` unknown → 404 JSON).
+
+### 8.5 Updated status
+
+- Backend tests: **109 passed** (was 105; +4 sim-compat/wiring tests) · frontend build clean
+- Defect register: **#1 closed**, **#3 closed (code — flash/verify on hardware pending)**, #2 open (firmware flash), #4–#11 as per phases
+- Sim script contract (§4) now has a permanent regression lock; any change that breaks `sim_seed.py ↔ server` compatibility fails CI immediately.
+

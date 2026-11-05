@@ -2,7 +2,7 @@
 	auto_https disable_redirects
 }
 
-http://, :80, :443, telemetry.durnibar.tech {
+http://, :80, :8080, :443, telemetry.durnibar.tech {
 	tls internal
 	# ── React SPA (ColdChain dashboard) ────────────────────────────────────
 	# Public QR batch check page

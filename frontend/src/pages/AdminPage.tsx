@@ -322,8 +322,8 @@ export function AdminPage() {
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 bg-surface-800 rounded-lg p-1 w-fit overflow-x-auto border border-surface-700/60">
+      {/* Tabs — wraps to multiple rows on small screens (no hidden overflow) */}
+      <div className="flex flex-wrap gap-1 bg-surface-800 rounded-lg p-1 border border-surface-700/60 w-full">
         {TABS.map(({ key, icon: Icon, label }) => (
           <button
             key={key}
@@ -341,7 +341,7 @@ export function AdminPage() {
       {tab === 'thresholds' && (
         <div className="space-y-4">
           <div className="card space-y-4">
-            <div className="flex justify-between items-center border-b border-surface-700/60 pb-3">
+            <div className="flex flex-wrap gap-3 justify-between items-center border-b border-surface-700/60 pb-3">
               <div>
                 <p className="text-sm font-semibold text-white flex items-center gap-2">
                   <Thermometer size={16} className="text-cyan-400" />
@@ -508,7 +508,7 @@ export function AdminPage() {
       {/* ── 2. Users & Roles (Immediate Enforcement) ── */}
       {tab === 'users' && (
         <div className="space-y-4">
-          <div className="flex justify-between items-center">
+          <div className="flex flex-wrap gap-2 justify-between items-center">
             <p className="text-xs text-slate-400">{users.length} registered accounts</p>
             <button onClick={() => setShowUserForm(true)} className="btn-primary text-xs">
               <Plus size={13} /> Add User
@@ -595,7 +595,7 @@ export function AdminPage() {
       {/* ── 3. Fridges ── */}
       {tab === 'fridges' && (
         <div className="space-y-4">
-          <div className="flex justify-between items-center">
+          <div className="flex flex-wrap gap-2 justify-between items-center">
             <p className="text-xs text-slate-400">{fridges.length} fridges registered</p>
             <button onClick={() => { setEditFridge(null); setFForm({ name: '', capacity_slots: '10', location: '', device_id: '' }); setShowFridgeForm(true) }} className="btn-primary text-xs">
               <Plus size={13} /> Add Fridge
@@ -695,7 +695,7 @@ export function AdminPage() {
       {/* ── 4. Devices & HMAC Secrets (DB-backed) ── */}
       {tab === 'devices' && (
         <div className="space-y-4">
-          <div className="flex justify-between items-center">
+          <div className="flex flex-wrap gap-2 justify-between items-center">
             <p className="text-xs text-slate-400">{devices.length} registered hardware nodes · secrets stored in database</p>
             <button onClick={() => { setEditDevice(null); setDForm({ device_id: '', name: '', secret: '', fridge_id: '' }); setShowDeviceForm(true) }} className="btn-primary text-xs">
               <Plus size={13} /> Add Device
