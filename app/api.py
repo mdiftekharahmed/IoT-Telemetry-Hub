@@ -22,7 +22,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from pydantic import AwareDatetime, BaseModel
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -31,16 +31,17 @@ import app.alerts as alert_mod
 from app.budget_engine import reset_discard, update_exposure
 from app.config import Settings
 from app.db import build_engine, session_factory
+from app.device_registry import db_device_secrets, generate_secret, get_device_secret
 from app.health import device_health
 from app.models import (
     Admin, AdminSession, Alert, AuditLog, Batch, BatchMovement, Device,
-    Fridge, IngestedMessage, MlPrediction, Parameter, Reading,
+    Fridge, IngestedMessage, MlPrediction, Nonce, Parameter, Reading,
     RelocationSuggestion, SecurityEvent, Telemetry, TelemetryRecord,
     User, UserProfile, utcnow,
 )
 from app.schemas import (
-    DeviceCreate, DeviceCreateOut, DeviceOut, DeviceUpdate,
-    Login, ParameterCreate, ParameterOut, ParameterUpdate,
+    CcDeviceCreate, CcDeviceUpdate, DeviceCreate, DeviceCreateOut, DeviceOut, DeviceUpdate,
+    FridgeCreate, FridgeUpdate, Login, ParameterCreate, ParameterOut, ParameterUpdate,
     ProfileOut, ProfileUpdate, RefreshRequest, TelemetryOut, as_utc,
 )
 from app.security import (
@@ -199,6 +200,41 @@ def _fridge_dict(f: Fridge, latest: Reading | None) -> dict:
         "location": f.location, "device_id": f.device_id,
         "latest": _reading_dict(latest) if latest else None,
     }
+
+
+def _latest_reading(db: Session, device_id: str | None) -> Reading | None:
+    if not device_id:
+        return None
+    return db.scalar(
+        select(Reading).where(Reading.device_id == device_id)
+        .order_by(Reading.ts.desc()).limit(1))
+
+
+def _bind_device_fridge(device: Device, fridge: Fridge) -> None:
+    """Keep the two-way device↔fridge binding consistent."""
+    device.fridge_id = fridge.id
+    fridge.device_id = device.device_id
+
+
+def _unbind_device_fridge(device: Device | None, fridge: Fridge | None) -> None:
+    if device is not None:
+        device.fridge_id = None
+    if fridge is not None:
+        fridge.device_id = None
+
+
+def _sync_mosquitto(db: Session, device_id: str, secret: str | None) -> None:
+    """Best-effort mosquitto credential sync (no-op outside the deployed VM)."""
+    pw_file = Path("/secrets/mosquitto.passwd")
+    if not pw_file.exists():
+        return
+    try:
+        cmd = (["mosquitto_passwd", "-D", str(pw_file), device_id] if secret is None
+               else ["mosquitto_passwd", "-b", str(pw_file), device_id, secret])
+        subprocess.run(cmd, check=True)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(500, f"Failed to update mosquitto password: {e}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -638,27 +674,93 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return result
 
     @app.post("/api/fridges", status_code=201, tags=["cc-fridges"])
-    def create_fridge(body: dict, db: DB,
+    def create_fridge(body: FridgeCreate, db: DB,
                       current_user: Annotated[User, Depends(AdminOnly)]):
-        f = Fridge(name=body["name"],
-                   capacity_slots=body.get("capacity_slots", 10),
-                   location=body.get("location"),
-                   device_id=body.get("device_id"))
-        db.add(f); db.commit(); db.refresh(f)
+        if body.device_id:
+            device = db.get(Device, body.device_id)
+            if device is None:
+                raise HTTPException(404, "Device not found")
+            if device.fridge_id is not None:
+                raise HTTPException(409, "Device already assigned to another fridge")
+        f = Fridge(**body.model_dump())
+        db.add(f); db.flush()
+        if body.device_id:
+            _bind_device_fridge(db.get(Device, body.device_id), f)
         audit_mod.append(db, actor=current_user.username, action="FRIDGE_CREATED",
                          payload={"fridge_id": f.id, "name": f.name})
         db.commit()
         return _fridge_dict(f, None)
 
+    @app.get("/api/fridges/{fridge_id}", tags=["cc-fridges"])
+    def get_fridge(fridge_id: int, db: DB,
+                   current_user: Annotated[User, Depends(AnyRole)]):
+        f = fridge_or_404(db, fridge_id)
+        latest = _latest_reading(db, f.device_id)
+        batches = db.scalars(select(Batch).where(Batch.fridge_id == f.id)).all()
+        return {**_fridge_dict(f, latest), "batches": [_batch_dict(b) for b in batches]}
+
+    @app.patch("/api/fridges/{fridge_id}", tags=["cc-fridges"])
+    def update_fridge(fridge_id: int, body: FridgeUpdate, db: DB,
+                      current_user: Annotated[User, Depends(AdminOnly)]):
+        """Update name / capacity / location / assigned device (two-way binding)."""
+        f = fridge_or_404(db, fridge_id)
+        changes = body.model_dump(exclude_unset=True)
+        if not changes:
+            raise HTTPException(422, "No fields to update")
+
+        audit_payload = {"fridge_id": f.id, "fields": sorted(changes.keys())}
+        old_device_id = f.device_id
+
+        if "device_id" in changes:
+            new_device_id = changes["device_id"]
+            if new_device_id is None:
+                if f.device_id:
+                    _unbind_device_fridge(db.get(Device, f.device_id), f)
+            else:
+                device = db.get(Device, new_device_id)
+                if device is None:
+                    raise HTTPException(404, "Device not found")
+                if device.fridge_id is not None and device.fridge_id != f.id:
+                    raise HTTPException(409, "Device already assigned to another fridge")
+                if f.device_id and f.device_id != new_device_id:
+                    _unbind_device_fridge(db.get(Device, f.device_id), None)
+                _bind_device_fridge(device, f)
+            audit_payload["device_from"] = old_device_id
+            audit_payload["device_to"] = new_device_id
+
+        for key in ("name", "capacity_slots", "location"):
+            if key in changes:
+                setattr(f, key, changes[key])
+
+        audit_mod.append(db, actor=current_user.username, action="FRIDGE_UPDATED",
+                         payload=audit_payload)
+        db.commit()
+        return {**_fridge_dict(f, _latest_reading(db, f.device_id)),
+                "batches": [_batch_dict(b) for b in db.scalars(
+                    select(Batch).where(Batch.fridge_id == f.id)).all()]}
+
+    @app.delete("/api/fridges/{fridge_id}", status_code=204, tags=["cc-fridges"])
+    def delete_fridge(fridge_id: int, db: DB,
+                      current_user: Annotated[User, Depends(AdminOnly)]):
+        """Delete a fridge. Batches keep their exposure history but become unassigned."""
+        f = fridge_or_404(db, fridge_id)
+        device = db.get(Device, f.device_id) if f.device_id else None
+        _unbind_device_fridge(device, f)
+        n_batches = db.scalar(
+            select(func.count()).select_from(Batch).where(Batch.fridge_id == f.id)) or 0
+        db.execute(update(Batch).where(Batch.fridge_id == f.id).values(fridge_id=None))
+        audit_mod.append(db, actor=current_user.username, action="FRIDGE_DELETED",
+                         payload={"fridge_id": f.id, "name": f.name,
+                                  "unassigned_batches": n_batches})
+        db.delete(f)
+        db.commit()
+        return Response(status_code=204)
+
     @app.get("/api/fridges/{fridge_id}/live", tags=["cc-fridges"])
     def fridge_live(fridge_id: int, db: DB,
                     current_user: Annotated[User, Depends(AnyRole)]):
         f = fridge_or_404(db, fridge_id)
-        latest = None
-        if f.device_id:
-            latest = db.scalar(
-                select(Reading).where(Reading.device_id == f.device_id)
-                .order_by(Reading.ts.desc()).limit(1))
+        latest = _latest_reading(db, f.device_id)
         batches = db.scalars(select(Batch).where(Batch.fridge_id == fridge_id)).all()
         return {**_fridge_dict(f, latest), "batches": [_batch_dict(b) for b in batches]}
 
@@ -953,6 +1055,160 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                  "created_at": as_utc(r.created_at).isoformat()} for r in rows]
 
     # =========================================================================
+    # ColdChain – Device Registry CRUD (DB-backed HMAC secrets)
+    # =========================================================================
+
+    def _device_dict(d: Device, db: DB) -> dict:
+        fridge = db.get(Fridge, d.fridge_id) if d.fridge_id else None
+        return {
+            "device_id": d.device_id, "name": d.name, "enabled": d.enabled,
+            "fridge_id": d.fridge_id, "fridge_name": fridge.name if fridge else None,
+            "has_secret": bool(d.mqtt_password),
+            "last_seen": as_utc(d.last_seen).isoformat() if d.last_seen else None,
+            "last_seq": d.last_seq,
+            "created_at": as_utc(d.created_at).isoformat(),
+        }
+
+    def device_or_404(db: DB, device_id: str) -> Device:
+        d = db.get(Device, device_id)
+        if not d:
+            raise HTTPException(404, "Device not found")
+        return d
+
+    @app.get("/api/cc/devices", tags=["cc-devices"])
+    def cc_devices_list(db: DB, current_user: Annotated[User, Depends(AnyRole)]):
+        """Device registry. Secrets never leave the API as list data (has_secret only)."""
+        return [_device_dict(d, db) for d in
+                db.scalars(select(Device).order_by(Device.device_id)).all()]
+
+    @app.post("/api/cc/devices", status_code=201, tags=["cc-devices"])
+    def cc_device_create(body: CcDeviceCreate, db: DB,
+                         current_user: Annotated[User, Depends(AdminOnly)]):
+        """Register a node. The HMAC secret may be user-set (validated hex) or minted."""
+        if db.get(Device, body.device_id):
+            raise HTTPException(409, "Device already exists")
+        if db.scalar(select(func.count()).select_from(Device)) >= settings.max_devices:
+            raise HTTPException(409, f"Maximum of {settings.max_devices} registered devices reached")
+        if body.fridge_id is not None:
+            fridge = db.get(Fridge, body.fridge_id)
+            if fridge is None:
+                raise HTTPException(404, "Fridge not found")
+            if fridge.device_id:
+                raise HTTPException(409, "Fridge already has an assigned device")
+
+        # Secret lives ONLY in the DB (devices.mqtt_password); never hard-coded.
+        secret = body.secret.lower() if body.secret else generate_secret()
+        device = Device(device_id=body.device_id, name=body.name,
+                        enabled=body.enabled, mqtt_password=secret)
+        db.add(device); db.flush()
+        if body.fridge_id is not None:
+            _bind_device_fridge(device, db.get(Fridge, body.fridge_id))
+
+        _sync_mosquitto(db, device.device_id, secret)
+        audit_mod.append(db, actor=current_user.username, action="DEVICE_CREATED",
+                         payload={"device_id": device.device_id, "fridge_id": body.fridge_id,
+                                  "secret_source": "user" if body.secret else "generated"})
+        db.commit()
+        # The secret is returned exactly once at creation for firmware/simulator config.
+        return {**_device_dict(device, db), "secret": secret}
+
+    @app.patch("/api/cc/devices/{device_id}", tags=["cc-devices"])
+    def cc_device_update(device_id: str, body: CcDeviceUpdate, db: DB,
+                         current_user: Annotated[User, Depends(AdminOnly)]):
+        """Update name / enabled / fridge binding / secret (set by user or rotate)."""
+        device = device_or_404(db, device_id)
+        changes = body.model_dump(exclude_unset=True)
+        if not changes:
+            raise HTTPException(422, "No fields to update")
+
+        new_secret: str | None = None
+        if body.rotate:
+            new_secret = generate_secret()
+        elif body.secret:
+            new_secret = body.secret.lower()
+
+        if new_secret is not None:
+            device.mqtt_password = new_secret
+            _sync_mosquitto(db, device.device_id, new_secret)
+            audit_mod.append(db, actor=current_user.username,
+                             action="DEVICE_SECRET_ROTATED" if body.rotate else "DEVICE_SECRET_SET",
+                             payload={"device_id": device.device_id,
+                                      "source": "rotate" if body.rotate else "user"})
+
+        if "fridge_id" in changes:
+            new_fridge_id = changes["fridge_id"]
+            if new_fridge_id is None:
+                if device.fridge_id:
+                    _unbind_device_fridge(device, db.get(Fridge, device.fridge_id))
+            else:
+                fridge = db.get(Fridge, new_fridge_id)
+                if fridge is None:
+                    raise HTTPException(404, "Fridge not found")
+                if fridge.device_id and fridge.device_id != device.device_id:
+                    raise HTTPException(409, "Fridge already has an assigned device")
+                if device.fridge_id and device.fridge_id != new_fridge_id:
+                    _unbind_device_fridge(None, db.get(Fridge, device.fridge_id))
+                _bind_device_fridge(device, fridge)
+
+        for key in ("name", "enabled"):
+            if key in changes:
+                setattr(device, key, changes[key])
+
+        if any(k in changes for k in ("name", "enabled", "fridge_id")):
+            audit_mod.append(db, actor=current_user.username, action="DEVICE_UPDATED",
+                             payload={"device_id": device.device_id,
+                                      "fields": sorted(set(changes) - {"secret"})})
+        db.commit()
+        out = _device_dict(device, db)
+        if new_secret is not None:
+            out["secret"] = new_secret  # shown once after set/rotate
+        return out
+
+    @app.get("/api/cc/devices/{device_id}/secret", tags=["cc-devices"])
+    def cc_device_secret(device_id: str, db: DB,
+                         current_user: Annotated[User, Depends(AdminOnly)]):
+        """Reveal the currently stored HMAC secret (admin only; audited)."""
+        device = device_or_404(db, device_id)
+        if not device.mqtt_password:
+            raise HTTPException(404, "Device has no secret stored")
+        audit_mod.append(db, actor=current_user.username, action="DEVICE_SECRET_VIEWED",
+                         payload={"device_id": device.device_id})
+        db.commit()
+        return {"device_id": device.device_id, "secret": device.mqtt_password}
+
+    @app.delete("/api/cc/devices/{device_id}", status_code=204, tags=["cc-devices"])
+    def cc_device_delete(device_id: str, db: DB,
+                         current_user: Annotated[User, Depends(AdminOnly)],
+                         force: bool = Query(default=False)):
+        """Delete a node. Reading/telemetry history must be `force`-purged to proceed."""
+        device = device_or_404(db, device_id)
+        n_readings = db.scalar(
+            select(func.count()).select_from(Reading).where(Reading.device_id == device_id)) or 0
+        n_telemetry = db.scalar(
+            select(func.count()).select_from(Telemetry).where(Telemetry.device_id == device_id)) or 0
+        if (n_readings or n_telemetry) and not force:
+            raise HTTPException(409, "Device has stored readings; pass ?force=true to purge history")
+
+        _unbind_device_fridge(device, db.get(Fridge, device.fridge_id) if device.fridge_id else None)
+        fridge_by_ref = db.scalar(select(Fridge).where(Fridge.device_id == device_id))
+        if fridge_by_ref:
+            _unbind_device_fridge(None, fridge_by_ref)
+
+        purged = 0
+        if force:
+            purged = n_readings
+            for table in (Reading, Telemetry, TelemetryRecord, IngestedMessage,
+                          Nonce, MlPrediction):
+                db.execute(delete(table).where(table.device_id == device_id))
+
+        _sync_mosquitto(db, device_id, None)
+        audit_mod.append(db, actor=current_user.username, action="DEVICE_DELETED",
+                         payload={"device_id": device_id, "purged_readings": purged})
+        db.delete(device)
+        db.commit()
+        return Response(status_code=204)
+
+    # =========================================================================
     # ColdChain – Users (admin only)
     # =========================================================================
 
@@ -1089,8 +1345,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # Push SET_SIM / FAULT_INJECT command to the device via MQTT
         try:
             from app.mqtt_publisher import publish_command as _pub_cmd
+            from app.device_registry import get_device_secret as _dev_secret
             cmd_type = body.get("cmd", "SET_SIM")
-            _pub_cmd(settings, device_id, cmd_type, body)
+            _pub_cmd(settings, device_id, cmd_type, body,
+                     secret=_dev_secret(db, device_id))
         except Exception as _exc:
             logger.warning("Downlink %s to %s failed: %s", cmd_type, device_id, _exc)
         return {"status": "fault injected", "device_id": device_id, "params": body}
@@ -1108,8 +1366,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # Broadcast SET_SCALE to all registered devices
         try:
             from app.mqtt_publisher import publish_command as _pub_cmd
+            from app.device_registry import db_device_secrets as _db_secrets
+            _secrets = _db_secrets(db)
             for dev in db.scalars(select(Device).where(Device.enabled == True)).all():
-                _pub_cmd(settings, dev.device_id, "SET_SCALE", {"time_scale": new_scale})
+                _pub_cmd(settings, dev.device_id, "SET_SCALE", {"time_scale": new_scale},
+                         secret=_secrets.get(dev.device_id))
         except Exception as _exc:
             logger.warning("SET_SCALE broadcast failed: %s", _exc)
         return {"demo_time_scale": new_scale}

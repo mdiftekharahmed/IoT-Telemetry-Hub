@@ -123,7 +123,9 @@ def update_thresholds(
                 from sqlalchemy import select
                 from app.models import Device
                 from app.mqtt_publisher import publish_command
+                from app.device_registry import db_device_secrets
 
+                secrets = db_device_secrets(db)
                 devices = db.scalars(select(Device).where(Device.enabled == True)).all()
                 for dev in devices:
                     publish_command(
@@ -138,6 +140,7 @@ def update_thresholds(
                             "safe_max": current["temp_safe_max"],
                             "door_alarm_s": current["door_alarm_s"],
                         },
+                        secret=secrets.get(dev.device_id),
                     )
             except Exception as exc:
                 logger.warning("Failed to broadcast SET_CONFIG to devices: %s", exc)

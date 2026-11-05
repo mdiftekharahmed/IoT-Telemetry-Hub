@@ -7,15 +7,15 @@ import {
 import { toast } from 'sonner'
 import {
   getUsers, createUser, updateUser,
-  getFridges, createFridge,
-  getDevices, createDevice,
+  getFridges, createFridge, updateFridge, deleteFridge,
+  getCcDevices, createCcDevice, updateCcDevice, deleteCcDevice, getDeviceSecret,
   getThresholds, updateThresholds,
   getAdminParameters, addParameter, updateParameter, deleteParameter, clearParameterTelemetry,
   setTimeScale, simFault,
 } from '../api/endpoints'
 import { useAuth } from '../hooks/useAuth'
 import { fmtDate } from '../lib/utils'
-import type { User, Fridge, Device, SystemThresholds, AdminParameterItem } from '../types'
+import type { User, Fridge, Device, CcDevice, SystemThresholds, AdminParameterItem } from '../types'
 
 
 export function AdminPage() {
@@ -30,6 +30,8 @@ export function AdminPage() {
   const [showParamForm, setShowParamForm]     = useState(false)
   const [createdSecret, setCreatedSecret]     = useState<{ devId: string; secret: string } | null>(null)
   const [copiedSecret, setCopiedSecret]       = useState(false)
+  const [editFridge, setEditFridge]           = useState<Fridge | null>(null)
+  const [editDevice, setEditDevice]           = useState<CcDevice | null>(null)
 
   // Simulation state
   const [timeScaleVal, setTimeScaleVal]     = useState(1)
@@ -39,7 +41,7 @@ export function AdminPage() {
   // Queries
   const { data: users   = [] } = useQuery<User[]>({ queryKey: ['users'],   queryFn: getUsers   })
   const { data: fridges = [] } = useQuery<Fridge[]>({ queryKey: ['fridges'], queryFn: getFridges })
-  const { data: devices = [] } = useQuery<Device[]>({ queryKey: ['devices'], queryFn: getDevices })
+  const { data: devices = [] } = useQuery<CcDevice[]>({ queryKey: ['cc-devices'], queryFn: getCcDevices })
   const { data: thresholds, isLoading: thresholdsLoading } = useQuery<SystemThresholds>({
     queryKey: ['thresholds'],
     queryFn: getThresholds,
@@ -52,7 +54,8 @@ export function AdminPage() {
   // Forms
   const [uForm, setUForm] = useState({ username: '', password: '', role: 'pharmacist' })
   const [fForm, setFForm] = useState({ name: '', capacity_slots: '10', location: '', device_id: '' })
-  const [dForm, setDForm] = useState({ device_id: '', name: '' })
+  const [dForm, setDForm] = useState({ device_id: '', name: '', secret: '', fridge_id: '' })
+  const [editDForm, setEditDForm] = useState({ name: '', enabled: true, fridge_id: '', secret: '' })
   const [pForm, setPForm] = useState({ name: '', unit: '', enabled: true })
   const [editParam, setEditParam] = useState<AdminParameterItem | null>(null)
   const [editParamForm, setEditParamForm] = useState({ unit: '', enabled: true })
@@ -102,22 +105,120 @@ export function AdminPage() {
     onSuccess: () => {
       toast.success('Fridge created')
       qc.invalidateQueries({ queryKey: ['fridges'] })
+      qc.invalidateQueries({ queryKey: ['cc-devices'] })
       setShowFridgeForm(false)
       setFForm({ name: '', capacity_slots: '10', location: '', device_id: '' })
     },
-    onError: () => toast.error('Failed to create fridge'),
+    onError: (err: any) => toast.error(err?.response?.data?.detail || 'Failed to create fridge'),
+  })
+
+  const updateFridgeMut = useMutation({
+    mutationFn: () => {
+      if (!editFridge) return Promise.resolve()
+      return updateFridge(editFridge.id, {
+        name: fForm.name,
+        capacity_slots: Number(fForm.capacity_slots),
+        location: fForm.location || null,
+        device_id: fForm.device_id || null,
+      })
+    },
+    onSuccess: () => {
+      toast.success('Fridge updated')
+      qc.invalidateQueries({ queryKey: ['fridges'] })
+      qc.invalidateQueries({ queryKey: ['cc-devices'] })
+      setShowFridgeForm(false)
+      setEditFridge(null)
+    },
+    onError: (err: any) => toast.error(err?.response?.data?.detail || 'Failed to update fridge'),
+  })
+
+  const deleteFridgeMut = useMutation({
+    mutationFn: (id: number) => deleteFridge(id),
+    onSuccess: () => {
+      toast.success('Fridge deleted (batches unassigned)')
+      qc.invalidateQueries({ queryKey: ['fridges'] })
+      qc.invalidateQueries({ queryKey: ['cc-devices'] })
+      qc.invalidateQueries({ queryKey: ['batches'] })
+    },
+    onError: (err: any) => toast.error(err?.response?.data?.detail || 'Failed to delete fridge'),
   })
 
   const createDeviceMut = useMutation({
-    mutationFn: () => createDevice({ device_id: dForm.device_id, name: dForm.name }),
-    onSuccess: (data: { device_id: string; mqtt_password?: string }) => {
+    mutationFn: () => createCcDevice({
+      device_id: dForm.device_id,
+      name: dForm.name,
+      fridge_id: dForm.fridge_id ? Number(dForm.fridge_id) : undefined,
+      secret: dForm.secret.trim() ? dForm.secret.trim().toLowerCase() : undefined,
+    }),
+    onSuccess: (data: CcDevice) => {
       toast.success(`Device ${data.device_id} registered`)
-      qc.invalidateQueries({ queryKey: ['devices'] })
+      qc.invalidateQueries({ queryKey: ['cc-devices'] })
+      qc.invalidateQueries({ queryKey: ['fridges'] })
       setShowDeviceForm(false)
-      setCreatedSecret({ devId: data.device_id, secret: data.mqtt_password || '' })
-      setDForm({ device_id: '', name: '' })
+      if (data.secret) setCreatedSecret({ devId: data.device_id, secret: data.secret })
+      setDForm({ device_id: '', name: '', secret: '', fridge_id: '' })
     },
     onError: (err: any) => toast.error(err?.response?.data?.detail || 'Failed to create device'),
+  })
+
+  const updateDeviceMut = useMutation({
+    mutationFn: () => {
+      if (!editDevice) return Promise.resolve()
+      return updateCcDevice(editDevice.device_id, {
+        name: editDForm.name,
+        enabled: editDForm.enabled,
+        fridge_id: editDForm.fridge_id ? Number(editDForm.fridge_id) : null,
+        secret: editDForm.secret.trim() ? editDForm.secret.trim().toLowerCase() : undefined,
+      })
+    },
+    onSuccess: (data: CcDevice) => {
+      toast.success(`Device ${data.device_id} updated`)
+      qc.invalidateQueries({ queryKey: ['cc-devices'] })
+      qc.invalidateQueries({ queryKey: ['fridges'] })
+      setShowDeviceForm(false)
+      setEditDevice(null)
+      if (data.secret) setCreatedSecret({ devId: data.device_id, secret: data.secret })
+    },
+    onError: (err: any) => toast.error(err?.response?.data?.detail || 'Failed to update device'),
+  })
+
+  const rotateDeviceMut = useMutation({
+    mutationFn: (device_id: string) => updateCcDevice(device_id, { rotate: true }),
+    onSuccess: (data: CcDevice) => {
+      toast.success(`Secret rotated for ${data.device_id} — old secret is now invalid`)
+      qc.invalidateQueries({ queryKey: ['cc-devices'] })
+      if (data.secret) setCreatedSecret({ devId: data.device_id, secret: data.secret })
+    },
+    onError: (err: any) => toast.error(err?.response?.data?.detail || 'Failed to rotate secret'),
+  })
+
+  const deleteDeviceMut = useMutation({
+    mutationFn: ({ device_id, force }: { device_id: string; force: boolean }) =>
+      deleteCcDevice(device_id, force),
+    onSuccess: () => {
+      toast.success('Device deleted')
+      qc.invalidateQueries({ queryKey: ['cc-devices'] })
+      qc.invalidateQueries({ queryKey: ['fridges'] })
+    },
+    onError: (err: any) => {
+      if (err?.response?.status === 409) {
+        const vars = deleteDeviceMut.variables
+        const device_id = typeof vars === 'object' && vars ? vars.device_id : null
+        if (device_id
+            && window.confirm('Device has stored readings. Delete and purge its reading history too?')) {
+          deleteDeviceMut.mutate({ device_id, force: true })
+          return
+        }
+      }
+      toast.error(err?.response?.data?.detail || 'Failed to delete device')
+    },
+  })
+
+  const revealSecretMut = useMutation({
+    mutationFn: (device_id: string) => getDeviceSecret(device_id),
+    onSuccess: (data: { device_id: string; secret: string }) =>
+      setCreatedSecret({ devId: data.device_id, secret: data.secret }),
+    onError: (err: any) => toast.error(err?.response?.data?.detail || 'Failed to reveal secret'),
   })
 
   const updateThresholdsMut = useMutation({
@@ -192,14 +293,6 @@ export function AdminPage() {
     onSuccess: () => toast.success('Fault injected'),
     onError: () => toast.error('Failed to inject fault — check device ID and JSON'),
   })
-
-  const copySecret = () => {
-    if (createdSecret?.secret) {
-      navigator.clipboard.writeText(createdSecret.secret)
-      setCopiedSecret(true)
-      setTimeout(() => setCopiedSecret(false), 2000)
-    }
-  }
 
   if (!isAdmin) return (
     <div className="p-6 flex flex-col items-center justify-center min-h-64 gap-2 text-slate-500">
@@ -504,20 +597,44 @@ export function AdminPage() {
         <div className="space-y-4">
           <div className="flex justify-between items-center">
             <p className="text-xs text-slate-400">{fridges.length} fridges registered</p>
-            <button onClick={() => setShowFridgeForm(true)} className="btn-primary text-xs">
+            <button onClick={() => { setEditFridge(null); setFForm({ name: '', capacity_slots: '10', location: '', device_id: '' }); setShowFridgeForm(true) }} className="btn-primary text-xs">
               <Plus size={13} /> Add Fridge
             </button>
           </div>
           <div className="table-wrapper">
             <table className="tbl">
-              <thead><tr><th>Name</th><th>Location</th><th>Assigned Device</th><th>Capacity</th></tr></thead>
+              <thead><tr><th>Name</th><th>Location</th><th>Assigned Device</th><th>Capacity</th><th>Batches</th><th className="text-right">Actions</th></tr></thead>
               <tbody>
-                {fridges.map((f: Fridge) => (
+                {fridges.map((f: any) => (
                   <tr key={f.id}>
                     <td className="font-medium text-white">{f.name}</td>
                     <td className="text-xs text-slate-400">{f.location ?? '—'}</td>
                     <td className="font-mono text-xs text-brand-300">{f.device_id ?? '—'}</td>
                     <td className="text-xs">{f.capacity_slots} slots</td>
+                    <td className="text-xs">{Array.isArray(f.batches) ? f.batches.length : '—'}</td>
+                    <td className="text-right">
+                      <div className="inline-flex gap-1">
+                        <button
+                          onClick={() => {
+                            setEditFridge(f)
+                            setFForm({ name: f.name, capacity_slots: String(f.capacity_slots), location: f.location ?? '', device_id: f.device_id ?? '' })
+                            setShowFridgeForm(true)
+                          }}
+                          className="btn-icon text-slate-400 hover:text-brand-300"
+                          title="Edit fridge"
+                        ><Pencil size={13} /></button>
+                        <button
+                          onClick={() => {
+                            const n = Array.isArray(f.batches) ? f.batches.length : 0
+                            if (window.confirm(`Delete fridge "${f.name}"? ${n > 0 ? `${n} batch(es) will be unassigned (exposure history kept).` : ''}`)) {
+                              deleteFridgeMut.mutate(f.id)
+                            }
+                          }}
+                          className="btn-icon text-slate-400 hover:text-red-400"
+                          title="Delete fridge"
+                        ><Trash2 size={13} /></button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -528,8 +645,8 @@ export function AdminPage() {
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
               <div className="card w-full max-w-sm mx-4 animate-in">
                 <div className="flex items-center justify-between mb-4">
-                  <h2 className="font-semibold text-white">Add New Storage Fridge</h2>
-                  <button onClick={() => setShowFridgeForm(false)} className="btn-icon text-slate-400"><X size={15}/></button>
+                  <h2 className="font-semibold text-white">{editFridge ? 'Edit Storage Fridge' : 'Add New Storage Fridge'}</h2>
+                  <button onClick={() => { setShowFridgeForm(false); setEditFridge(null) }} className="btn-icon text-slate-400"><X size={15}/></button>
                 </div>
                 <div className="space-y-3">
                   <div>
@@ -548,15 +665,26 @@ export function AdminPage() {
                     <label className="label">Assign Device ID</label>
                     <select className="input" value={fForm.device_id} onChange={e => setFForm(f => ({...f, device_id: e.target.value}))}>
                       <option value="">— none —</option>
-                      {devices.map((d: Device) => <option key={d.device_id} value={d.device_id}>{d.device_id} ({d.name})</option>)}
+                      {devices.map((d: CcDevice) => (
+                        <option key={d.device_id} value={d.device_id}>
+                          {d.device_id} ({d.name}){d.fridge_id && d.fridge_id !== (editFridge?.id ?? -1) ? ' · bound to other fridge' : ''}
+                        </option>
+                      ))}
                     </select>
+                    <span className="text-[10px] text-slate-500">Binding is two-way: the device is bound and unbound together with this fridge.</span>
                   </div>
                 </div>
                 <div className="flex gap-2 justify-end mt-4">
-                  <button onClick={() => setShowFridgeForm(false)} className="btn-ghost">Cancel</button>
-                  <button onClick={() => createFridgeMut.mutate()} className="btn-primary" disabled={createFridgeMut.isPending || !fForm.name}>
-                    {createFridgeMut.isPending ? 'Creating…' : 'Create'}
-                  </button>
+                  <button onClick={() => { setShowFridgeForm(false); setEditFridge(null) }} className="btn-ghost">Cancel</button>
+                  {editFridge ? (
+                    <button onClick={() => updateFridgeMut.mutate()} className="btn-primary" disabled={updateFridgeMut.isPending || !fForm.name}>
+                      {updateFridgeMut.isPending ? 'Saving…' : 'Save Changes'}
+                    </button>
+                  ) : (
+                    <button onClick={() => createFridgeMut.mutate()} className="btn-primary" disabled={createFridgeMut.isPending || !fForm.name}>
+                      {createFridgeMut.isPending ? 'Creating…' : 'Create'}
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -564,96 +692,167 @@ export function AdminPage() {
         </div>
       )}
 
-      {/* ── 4. Devices & Generated HMAC Secrets ── */}
+      {/* ── 4. Devices & HMAC Secrets (DB-backed) ── */}
       {tab === 'devices' && (
         <div className="space-y-4">
           <div className="flex justify-between items-center">
-            <p className="text-xs text-slate-400">{devices.length} registered hardware nodes</p>
-            <button onClick={() => setShowDeviceForm(true)} className="btn-primary text-xs">
+            <p className="text-xs text-slate-400">{devices.length} registered hardware nodes · secrets stored in database</p>
+            <button onClick={() => { setEditDevice(null); setDForm({ device_id: '', name: '', secret: '', fridge_id: '' }); setShowDeviceForm(true) }} className="btn-primary text-xs">
               <Plus size={13} /> Add Device
             </button>
           </div>
           <div className="table-wrapper">
             <table className="tbl">
-              <thead><tr><th>Device ID</th><th>Name</th><th>Status</th><th>Last Seen</th><th>Last Seq</th></tr></thead>
+              <thead><tr><th>Device ID</th><th>Name</th><th>Fridge</th><th>Status</th><th>Secret</th><th>Last Seen</th><th>Last Seq</th><th className="text-right">Actions</th></tr></thead>
               <tbody>
-                {devices.map((d: Device) => (
+                {devices.map((d: CcDevice) => (
                   <tr key={d.device_id}>
                     <td className="font-mono text-xs text-brand-300 font-semibold">{d.device_id}</td>
                     <td className="text-sm text-white">{d.name}</td>
+                    <td className="text-xs text-slate-300">{d.fridge_name ?? '—'}</td>
                     <td>
                       {d.enabled
                         ? <span className="badge-safe text-[10px]">Enabled</span>
                         : <span className="badge text-[10px] bg-surface-700 text-slate-400 border-surface-600">Disabled</span>
                       }
                     </td>
+                    <td>
+                      {d.has_secret
+                        ? <span className="badge text-[10px] bg-amber-500/10 text-amber-300 border-amber-500/30">Stored</span>
+                        : <span className="badge text-[10px] bg-surface-700 text-slate-400 border-surface-600">None</span>}
+                    </td>
                     <td className="text-xs text-slate-400">{d.last_seen ? fmtDate(d.last_seen) : '—'}</td>
                     <td className="font-mono text-xs text-slate-400">{d.last_seq ?? '—'}</td>
+                    <td className="text-right">
+                      <div className="inline-flex gap-1">
+                        <button
+                          onClick={() => {
+                            setEditDevice(d)
+                            setEditDForm({ name: d.name, enabled: d.enabled, fridge_id: d.fridge_id ? String(d.fridge_id) : '', secret: '' })
+                            setShowDeviceForm(true)
+                          }}
+                          className="btn-icon text-slate-400 hover:text-brand-300" title="Edit device / set secret"
+                        ><Pencil size={13} /></button>
+                        <button
+                          onClick={() => revealSecretMut.mutate(d.device_id)}
+                          className="btn-icon text-slate-400 hover:text-amber-300" title="Reveal secret"
+                        ><Lock size={13} /></button>
+                        <button
+                          onClick={() => window.confirm(`Rotate the HMAC secret for ${d.device_id}? The old secret stops working immediately (update the firmware).`) && rotateDeviceMut.mutate(d.device_id)}
+                          className="btn-icon text-slate-400 hover:text-sky-300" title="Rotate secret"
+                        ><RefreshCw size={13} /></button>
+                        <button
+                          onClick={() => window.confirm(`Delete device ${d.device_id}?`) && deleteDeviceMut.mutate({ device_id: d.device_id, force: false })}
+                          className="btn-icon text-slate-400 hover:text-red-400" title="Delete device"
+                        ><Trash2 size={13} /></button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
 
-          {/* Add Device Modal */}
+          {/* Add / Edit Device Modal */}
           {showDeviceForm && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
               <div className="card w-full max-w-sm mx-4 animate-in">
                 <div className="flex items-center justify-between mb-4">
-                  <h2 className="font-semibold text-white">Register Hardware Node</h2>
-                  <button onClick={() => setShowDeviceForm(false)} className="btn-icon text-slate-400"><X size={15}/></button>
+                  <h2 className="font-semibold text-white">
+                    {editDevice ? `Edit Device ${editDevice.device_id}` : 'Register Hardware Node'}
+                  </h2>
+                  <button onClick={() => { setShowDeviceForm(false); setEditDevice(null) }} className="btn-icon text-slate-400"><X size={15}/></button>
                 </div>
                 <div className="space-y-3">
-                  <div>
-                    <label className="label">Device ID (e.g. fridge-C)</label>
-                    <input
-                      type="text" className="input font-mono text-xs"
-                      placeholder="fridge-C"
-                      value={dForm.device_id}
-                      onChange={e => setDForm(f => ({ ...f, device_id: e.target.value.trim() }))}
-                    />
-                    <span className="text-[10px] text-slate-500">Unique alphanumeric MQTT client identifier.</span>
-                  </div>
+                  {!editDevice && (
+                    <div>
+                      <label className="label">Device ID (e.g. fridge-C)</label>
+                      <input
+                        type="text" className="input font-mono text-xs"
+                        placeholder="fridge-C"
+                        value={dForm.device_id}
+                        onChange={e => setDForm(f => ({ ...f, device_id: e.target.value.trim() }))}
+                      />
+                      <span className="text-[10px] text-slate-500">Unique alphanumeric MQTT client identifier.</span>
+                    </div>
+                  )}
                   <div>
                     <label className="label">Friendly Name</label>
                     <input
                       type="text" className="input text-xs"
                       placeholder="Fridge C (ICU Storage)"
-                      value={dForm.name}
-                      onChange={e => setDForm(f => ({ ...f, name: e.target.value }))}
+                      value={editDevice ? editDForm.name : dForm.name}
+                      onChange={e => editDevice
+                        ? setEditDForm(f => ({ ...f, name: e.target.value }))
+                        : setDForm(f => ({ ...f, name: e.target.value }))}
                     />
+                  </div>
+                  {!editDevice && (
+                    <div>
+                      <label className="label">Bind to Fridge</label>
+                      <select className="input" value={dForm.fridge_id} onChange={e => setDForm(f => ({ ...f, fridge_id: e.target.value }))}>
+                        <option value="">— none —</option>
+                        {fridges.map((f: Fridge) => <option key={f.id} value={String(f.id)}>{f.name}</option>)}
+                      </select>
+                    </div>
+                  )}
+                  <div>
+                    <label className="label">
+                      {editDevice ? `New Secret (leave blank to keep current${editDevice.has_secret ? '' : ' — none stored'})` : 'Secret (optional — generated if blank)'}
+                    </label>
+                    <input
+                      type="text" className="input font-mono text-[11px]"
+                      placeholder="64-character hex (32 bytes)"
+                      value={editDevice ? editDForm.secret : dForm.secret}
+                      onChange={e => editDevice
+                        ? setEditDForm(f => ({ ...f, secret: e.target.value }))
+                        : setDForm(f => ({ ...f, secret: e.target.value }))}
+                    />
+                    <span className="text-[10px] text-slate-500">
+                      HMAC-SHA256 key shared with the node firmware. Stored in the database and editable anytime here.
+                    </span>
                   </div>
                 </div>
                 <div className="flex gap-2 justify-end mt-4">
-                  <button onClick={() => setShowDeviceForm(false)} className="btn-ghost">Cancel</button>
-                  <button
-                    onClick={() => createDeviceMut.mutate()}
-                    className="btn-primary"
-                    disabled={createDeviceMut.isPending || !dForm.device_id || !dForm.name}
-                  >
-                    {createDeviceMut.isPending ? 'Generating…' : 'Generate Secret & Register'}
-                  </button>
+                  <button onClick={() => { setShowDeviceForm(false); setEditDevice(null) }} className="btn-ghost">Cancel</button>
+                  {editDevice ? (
+                    <button
+                      onClick={() => updateDeviceMut.mutate()}
+                      className="btn-primary"
+                      disabled={updateDeviceMut.isPending || !editDForm.name}
+                    >
+                      {updateDeviceMut.isPending ? 'Saving…' : 'Save Changes'}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => createDeviceMut.mutate()}
+                      className="btn-primary"
+                      disabled={createDeviceMut.isPending || !dForm.device_id || !dForm.name}
+                    >
+                      {createDeviceMut.isPending ? 'Registering…' : dForm.secret.trim() ? 'Set Secret & Register' : 'Generate Secret & Register'}
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
           )}
 
-          {/* Secret Display Modal */}
+          {/* Secret Display Modal (create / set / rotate / reveal) */}
           {createdSecret && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
               <div className="card w-full max-w-md mx-4 animate-in border border-brand-500/50">
                 <h2 className="font-bold text-white text-base flex items-center gap-2">
                   <ShieldCheck size={18} className="text-emerald-400" />
-                  Hardware Node Key Generated
+                  Device Secret Key
                 </h2>
                 <p className="text-xs text-slate-300 mt-2">
-                  Device <code className="text-brand-300 font-bold">{createdSecret.devId}</code> has been registered. Copy this 64-character HMAC-SHA256 secret key to flash into the firmware:
+                  Device <code className="text-brand-300 font-bold">{createdSecret.devId}</code> — copy this 64-character HMAC-SHA256 secret into the firmware:
                 </p>
                 <div className="mt-3 p-3 bg-surface-900 rounded-lg border border-surface-700 flex items-center justify-between gap-2">
                   <span className="font-mono text-[11px] text-amber-300 break-all select-all">
                     {createdSecret.secret}
                   </span>
-                  <button onClick={copySecret} className="btn-primary text-xs py-1 px-2.5 flex-shrink-0">
+                  <button onClick={() => { navigator.clipboard.writeText(createdSecret.secret); setCopiedSecret(true); setTimeout(() => setCopiedSecret(false), 1500) }} className="btn-primary text-xs py-1 px-2.5 flex-shrink-0">
                     {copiedSecret ? <Check size={13} className="text-emerald-300" /> : <Copy size={13} />}
                     {copiedSecret ? 'Copied' : 'Copy'}
                   </button>

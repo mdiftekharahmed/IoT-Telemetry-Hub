@@ -19,6 +19,9 @@ export const getReport = () =>
 
 export const getFridges = () => api.get('/api/fridges').then(r => r.data)
 
+export const getFridge = (id: number) =>
+  api.get(`/api/fridges/${id}`).then(r => r.data)
+
 export const getFridgeLive = (id: number) =>
   api.get(`/api/fridges/${id}/live`).then(r => r.data)
 
@@ -29,6 +32,14 @@ export const getFridgeReadings = (
 
 export const createFridge = (body: { name: string; capacity_slots?: number; location?: string; device_id?: string }) =>
   api.post('/api/fridges', body).then(r => r.data)
+
+export const updateFridge = (
+  id: number,
+  body: Partial<{ name: string; capacity_slots: number; location: string | null; device_id: string | null }>,
+) => api.patch(`/api/fridges/${id}`, body).then(r => r.data)
+
+export const deleteFridge = (id: number) =>
+  api.delete(`/api/fridges/${id}`).then(r => r.data)
 
 // ── Batches ─────────────────────────────────────────────────────────────────
 
@@ -104,6 +115,29 @@ export const getDevices = () => api.get('/api/devices').then(r => r.data)
 
 export const createDevice = (body: { device_id: string; name: string }) =>
   api.post('/api/devices', body).then(r => r.data)
+
+// ── ColdChain Device Registry (DB-backed HMAC secrets) ──────────────────────
+
+export const getCcDevices = () => api.get('/api/cc/devices').then(r => r.data)
+
+export const createCcDevice = (body: {
+  device_id: string; name: string; enabled?: boolean;
+  fridge_id?: number | null; secret?: string
+}) => api.post('/api/cc/devices', body).then(r => r.data)
+
+export const updateCcDevice = (
+  device_id: string,
+  body: Partial<{
+    name: string; enabled: boolean; fridge_id: number | null;
+    secret: string; rotate: boolean
+  }>,
+) => api.patch(`/api/cc/devices/${device_id}`, body).then(r => r.data)
+
+export const deleteCcDevice = (device_id: string, force = false) =>
+  api.delete(`/api/cc/devices/${device_id}`, { params: force ? { force: 'true' } : {} }).then(r => r.data)
+
+export const getDeviceSecret = (device_id: string) =>
+  api.get(`/api/cc/devices/${device_id}/secret`).then(r => r.data)
 
 // ── Parameters ───────────────────────────────────────────────────────────────
 

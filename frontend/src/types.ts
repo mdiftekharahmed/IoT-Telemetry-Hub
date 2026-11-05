@@ -130,6 +130,19 @@ export interface Device {
   last_seq: number | null
 }
 
+export interface CcDevice {
+  device_id: string
+  name: string
+  enabled: boolean
+  fridge_id: number | null
+  fridge_name: string | null
+  has_secret: boolean
+  last_seen: string | null
+  last_seq: number | null
+  created_at: string
+  secret?: string // returned once after create / set / rotate
+}
+
 export interface LiveEvent {
   type: 'reading' | 'alert' | 'batch_status'
   fridge_id?: number

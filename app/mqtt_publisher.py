@@ -28,13 +28,19 @@ def publish_command(
     device_id: str,
     cmd_type: str,
     payload: dict[str, Any] | None = None,
+    secret: str | None = None,
 ) -> bool:
-    """Sign and publish an authenticated command to an edge node."""
+    """Sign and publish an authenticated command to an edge node.
+
+    `secret` when provided comes from the DB-backed device registry
+    (`app.device_registry.get_device_secret`); when omitted the legacy
+    environment config is used as a fallback.
+    """
     payload = payload or {}
     ts = int(time.time())
     nonce = secrets.token_hex(8)
     d_canon = canonical_json(payload)
-    secret = settings.device_secret(device_id) or ""
+    secret = secret if secret is not None else settings.device_secret(device_id) or ""
     sig = hmac_sign(secret, [cmd_type, str(ts), nonce, d_canon]) if secret else "unsigned"
 
     envelope = {

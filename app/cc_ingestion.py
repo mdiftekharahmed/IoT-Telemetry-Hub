@@ -171,7 +171,8 @@ def ingest_telemetry(
                 _log_security_event(db, device_id, "UNKNOWN_DEVICE", device_id)
                 return IngestResult("device_rejected")
 
-            secret = device_secrets.get(device_id)
+            # Secret source of truth = devices table; passed map is legacy fallback.
+            secret = device.mqtt_password or device_secrets.get(device_id)
             if not secret:
                 _log_security_event(db, device_id, "NO_SECRET", device_id)
                 return IngestResult("rejected")
@@ -239,7 +240,8 @@ def ingest_sync(
             if device is None or not device.enabled:
                 return IngestResult("device_rejected")
 
-            secret = device_secrets.get(device_id)
+            # Secret source of truth = devices table; passed map is legacy fallback.
+            secret = device.mqtt_password or device_secrets.get(device_id)
             if not secret:
                 return IngestResult("rejected")
 

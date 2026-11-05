@@ -62,6 +62,67 @@ class DeviceCreateOut(DeviceOut):
     pass
 
 
+# ── ColdChain: device & fridge CRUD ─────────────────────────────────────────
+
+SecretHex = Annotated[str, StringConstraints(pattern=r"^[a-fA-F0-9]{64}$")]
+
+
+class FridgeCreate(InputModel):
+    name: str = Field(min_length=1, max_length=120)
+    capacity_slots: int = Field(default=10, ge=1, le=1000)
+    location: str | None = Field(default=None, max_length=255)
+    device_id: Identifier | None = None
+
+    @field_validator("name")
+    @classmethod
+    def nonblank_name(cls, value):
+        if not value.strip():
+            raise ValueError("name must not be blank")
+        return value.strip()
+
+
+class FridgeUpdate(InputModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    capacity_slots: int | None = Field(default=None, ge=1, le=1000)
+    location: str | None = Field(default=None, max_length=255)
+    device_id: Identifier | None = None
+
+    _nonblank_name = field_validator("name")(FridgeCreate.nonblank_name.__func__)
+
+
+class CcDeviceCreate(InputModel):
+    device_id: Identifier
+    name: str = Field(min_length=1, max_length=120)
+    enabled: bool = True
+    fridge_id: int | None = None
+    # Optional user-set HMAC secret (64-char hex, 32 bytes). Generated when omitted.
+    secret: SecretHex | None = None
+
+    @field_validator("name")
+    @classmethod
+    def nonblank_name(cls, value):
+        if not value.strip():
+            raise ValueError("name must not be blank")
+        return value.strip()
+
+
+class CcDeviceUpdate(InputModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    enabled: bool | None = None
+    fridge_id: int | None = None
+    # Set/replace the HMAC secret by user input (64-char hex)…
+    secret: SecretHex | None = None
+    # …or ask the server to generate a fresh one.
+    rotate: bool = False
+
+    @field_validator("name")
+    @classmethod
+    def nonblank_name(cls, value):
+        if not value.strip():
+            raise ValueError("name must not be blank")
+        return value.strip()
+
+
 class ParameterCreate(InputModel):
     name: ParameterName
     unit: str | None = Field(default=None, max_length=16)

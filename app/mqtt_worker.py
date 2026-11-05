@@ -102,8 +102,11 @@ class Collector:
             logger.warning("Rejected invalid legacy telemetry")
 
     def _handle_coldchain(self, topic: str, payload: bytes):
-        secrets = self.settings.device_secrets
-        window  = self.settings.hmac_ts_window_s
+        # Secret source of truth = devices table (env config only fills gaps).
+        from app.device_registry import resolve_secrets_map
+        with self.factory() as db:
+            secrets = resolve_secrets_map(db, self.settings.device_secrets)
+        window = self.settings.hmac_ts_window_s
 
         if "/telemetry" in topic:
             result = self._ingest_cc(self.factory, topic, payload, secrets, window)
@@ -259,7 +262,10 @@ class Collector:
         ts    = int(time.time())
         nonce = sec.token_hex(8)
         d_str = canonical_json(payload)
-        secret = self.settings.device_secret(device_id) or ""
+        # Secret source of truth = devices table (env config only fills gaps).
+        from app.device_registry import get_device_secret
+        with self.factory() as db:
+            secret = get_device_secret(db, device_id) or self.settings.device_secret(device_id) or ""
         sig = hmac_sign(secret, [cmd_type, str(ts), nonce, d_str]) if secret else "unsigned"
         msg = json.dumps({"type": cmd_type, "ts": ts, "nonce": nonce, "d": payload, "sig": sig})
         self.client.publish(f"cc/{device_id}/cmd", msg, qos=1)
